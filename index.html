@@ -521,6 +521,8 @@
                                 <input type="file" accept="application/json" class="hidden" onchange="importSiteData(this)">
                             </label>
                         </div>
+                        <p class="text-[11px] text-slate-400 leading-relaxed pt-2">මුළු site එකේම (index.html) source code එක download කරගන්න — GitHub වෙත upload කරන්න හෝ වෙනත් තැනක save කරගන්න.</p>
+                        <button onclick="downloadFullSiteHtml()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg"><i class="fa-solid fa-file-code mr-1.5"></i> Download Full Site Code (HTML)</button>
                     </div>
                 </div>
 
@@ -1743,9 +1745,25 @@
             if (!lesson) return;
             document.getElementById('lesson-code-title').innerText = lesson.title;
             const content = document.getElementById('lesson-code-content');
+            content.innerHTML = '';
             if (lesson.lessonCode && lesson.lessonCode.trim() !== '') {
-                content.innerHTML = lesson.lessonCode;
+                // Use a sandboxed iframe (srcdoc) instead of innerHTML.
+                // innerHTML strips out <script> tags and never runs them, which is
+                // why admin-pasted code (timers, quizzes, JS-driven UI, etc.) rendered
+                // fine visually but never actually worked on a student's device.
+                // An iframe with srcdoc gives the pasted HTML its own document, so its
+                // own <script> tags execute normally.
+                content.classList.add('p-0', 'overflow-hidden');
+                content.classList.remove('p-5');
+                const iframe = document.createElement('iframe');
+                iframe.id = 'lesson-code-iframe';
+                iframe.className = 'w-full h-full rounded-2xl border-0 bg-white';
+                iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals allow-popups');
+                content.appendChild(iframe);
+                iframe.srcdoc = lesson.lessonCode;
             } else {
+                content.classList.add('p-5');
+                content.classList.remove('p-0', 'overflow-hidden');
                 content.innerHTML = `<div class="flex flex-col items-center justify-center h-full text-slate-500 py-10 space-y-3">
                     <i class="fa-solid fa-code text-4xl mb-2 opacity-50"></i>
                     <p>${currentLang === 'si' ? 'මෙම පාඩම සඳහා UI/Code එකක් තවම ඇතුළත් කර නොමැත.' : 'No HTML/UI code added for this lesson yet.'}</p>
@@ -1762,6 +1780,12 @@
             box.classList.remove('w-screen', 'h-screen', 'rounded-none');
             box.classList.add('w-[98vw]', 'h-[95vh]', 'rounded-3xl');
             icon.className = 'fa-solid fa-expand';
+            // Clear the iframe so any running timers/intervals inside the pasted
+            // lesson code stop instead of continuing in the background.
+            const content = document.getElementById('lesson-code-content');
+            content.innerHTML = '';
+            content.classList.remove('p-0', 'overflow-hidden');
+            content.classList.add('p-5');
         }
 
         let isModalExpanded = false;
@@ -2553,6 +2577,38 @@
         }
 
         /* ============ BACKUP & RESTORE (Master Admin only) ============ */
+        // Downloads the actual live source file of this page (index.html) — the
+        // template/code itself, not the data. User data (users, lessons, quiz
+        // questions, etc.) lives in localStorage/Firestore and is handled by
+        // exportSiteData() above; this button is for grabbing the site's code,
+        // e.g. to re-upload to GitHub or keep an offline copy.
+        async function downloadFullSiteHtml() {
+            try {
+                let html;
+                if (location.protocol === 'file:') {
+                    // No server to fetch from when opened directly as a local file —
+                    // fall back to the current in-memory DOM.
+                    html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+                } else {
+                    const res = await fetch(location.pathname + location.search, { cache: 'no-store' });
+                    if (!res.ok) throw new Error('Fetch failed: ' + res.status);
+                    html = await res.text();
+                }
+                const blob = new Blob([html], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'index.html';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+                showToast('Full site HTML downloaded!', 'success');
+            } catch (err) {
+                showToast('Could not download site source — try "Save Page As" in your browser instead.', 'error');
+            }
+        }
+
         function exportSiteData() {
             const backup = {
                 exportedAt: new Date().toISOString(),
