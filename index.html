@@ -202,8 +202,10 @@
             closeSidebarOnMobile();
             const board = document.getElementById('leaderboard-section');
             const gameSec = document.getElementById('game-section');
+            const scheduleSec = document.getElementById('schedule-section');
             if (board && !board.classList.contains('hidden')) toggleLeaderboardView();
             if (gameSec && !gameSec.classList.contains('hidden')) toggleGameView();
+            if (scheduleSec && !scheduleSec.classList.contains('hidden')) toggleScheduleView();
             setSidebarActive('sidebar-link-dashboard');
         }
 
@@ -212,6 +214,7 @@
             if (which === 'leaderboard') { toggleLeaderboardView(); setSidebarActive('sidebar-link-leaderboard'); }
             else if (which === 'game') { toggleGameView(); setSidebarActive('sidebar-link-game'); }
             else if (which === 'focus') { openFocusMode(); setSidebarActive('sidebar-link-focus'); }
+            else if (which === 'schedule') { toggleScheduleView(); setSidebarActive('sidebar-link-schedule'); }
         }
 
         function openFocusMode() {
@@ -243,19 +246,42 @@
             focusMasterGain.gain.linearRampToValueAtTime(Math.max(0.0001, val / 100), focusAudioCtx.currentTime + 0.15);
         }
 
-        const focusTrackLabels = { drone: 'Deep Focus', rain: 'Rainy Night', ocean: 'Ocean Drift' };
+        const focusTrackLabels = {
+            drone: 'Deep Focus', rain: 'Rainy Night', ocean: 'Ocean Drift', white: 'White Noise',
+            brown: 'Brown Noise', forest: 'Forest Morning', crickets: 'Night Crickets',
+            bowl: 'Singing Bowl', chimes: 'Wind Chimes', cafe: 'Cafe Hum'
+        };
+        const focusTrackOrder = ['drone', 'rain', 'ocean', 'white', 'brown', 'forest', 'crickets', 'bowl', 'chimes', 'cafe'];
 
         /* Shows/hides the small floating "Now Playing" bar (bottom-left) that lets the
            ambient track keep going while the user is elsewhere in the app. */
         function updateMiniPlayer() {
             const bar = document.getElementById('focus-mini-player');
+            const topBar = document.getElementById('focus-top-indicator');
+            const nowPlayingName = document.getElementById('focus-nowplaying-name');
+            const nowPlayingLabel = document.getElementById('focus-nowplaying-label');
             if (!bar) return;
             const focusModalOpen = !document.getElementById('focus-mode-modal').classList.contains('hidden');
+            const label = focusCurrentTrack ? (focusTrackLabels[focusCurrentTrack] || focusCurrentTrack) : null;
             if (focusCurrentTrack && !focusModalOpen) {
-                document.getElementById('focus-mini-track-name').innerText = focusTrackLabels[focusCurrentTrack] || focusCurrentTrack;
+                document.getElementById('focus-mini-track-name').innerText = label;
                 bar.classList.remove('hidden');
             } else {
                 bar.classList.add('hidden');
+            }
+            if (topBar) {
+                if (focusCurrentTrack) {
+                    document.getElementById('focus-top-track-name').innerText = label;
+                    const isPaused = focusAudioCtx && focusAudioCtx.state === 'suspended';
+                    document.getElementById('focus-top-icon').className = isPaused ? 'fa-solid fa-play' : 'fa-solid fa-pause';
+                    topBar.classList.remove('hidden');
+                } else {
+                    topBar.classList.add('hidden');
+                }
+            }
+            if (nowPlayingName) {
+                nowPlayingName.innerText = label || '—';
+                if (nowPlayingLabel) nowPlayingLabel.innerText = focusCurrentTrack ? (currentLang === 'si' ? 'දැන් වාදනය වේ' : 'Now Playing') : (currentLang === 'si' ? 'Sound එකක් තෝරන්න' : 'Select a Sound');
             }
         }
 
@@ -280,6 +306,14 @@
             ensureFocusAudio();
             if (focusAudioCtx.state === 'suspended') focusAudioCtx.resume();
             if (focusCurrentTrack === name) { stopFocusTrack(); return; }
+            startFocusTrack(name);
+        }
+
+        /* Always (re)starts the given track, regardless of what's currently playing —
+           used by playFocusTrack (toggle-aware) and by Next/Prev (never toggles off). */
+        function startFocusTrack(name) {
+            ensureFocusAudio();
+            if (focusAudioCtx.state === 'suspended') focusAudioCtx.resume();
             stopFocusTrack();
             focusCurrentTrack = name;
             document.querySelectorAll('.focus-track-btn').forEach(b => {
@@ -335,9 +369,156 @@
                 lfo.connect(lfoGain); lfoGain.connect(waveGain.gain);
                 src.start(); lfo.start();
                 focusActiveNodes.push(src, filter, lfo);
+            } else if (name === 'white') {
+                // Flat-spectrum hiss, unfiltered — classic masking noise.
+                const src = ctx.createBufferSource();
+                src.buffer = makeNoiseBuffer(ctx, 2);
+                src.loop = true;
+                const g = ctx.createGain(); g.gain.value = 0.28;
+                src.connect(g); g.connect(focusMasterGain);
+                src.start();
+                focusActiveNodes.push(src);
+            } else if (name === 'brown') {
+                // Noise run through a leaky integrator (via lowpass) for a deep, rumbly hiss.
+                const src = ctx.createBufferSource();
+                src.buffer = makeNoiseBuffer(ctx, 2);
+                src.loop = true;
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass'; filter.frequency.value = 180;
+                const g = ctx.createGain(); g.gain.value = 0.9;
+                src.connect(filter); filter.connect(g); g.connect(focusMasterGain);
+                src.start();
+                focusActiveNodes.push(src, filter);
+            } else if (name === 'forest') {
+                // Soft filtered noise "air" bed plus occasional short chirp-like blips.
+                const src = ctx.createBufferSource();
+                src.buffer = makeNoiseBuffer(ctx, 3);
+                src.loop = true;
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'bandpass'; filter.frequency.value = 2200; filter.Q.value = 0.4;
+                const g = ctx.createGain(); g.gain.value = 0.18;
+                src.connect(filter); filter.connect(g); g.connect(focusMasterGain);
+                src.start();
+                focusActiveNodes.push(src, filter);
+                const chirpInterval = setInterval(() => {
+                    if (focusCurrentTrack !== 'forest') return;
+                    const osc = ctx.createOscillator();
+                    osc.type = 'sine'; osc.frequency.value = 1800 + Math.random() * 1200;
+                    const cg = ctx.createGain(); cg.gain.value = 0;
+                    osc.connect(cg); cg.connect(focusMasterGain);
+                    const t = ctx.currentTime;
+                    cg.gain.setValueAtTime(0, t);
+                    cg.gain.linearRampToValueAtTime(0.08, t + 0.03);
+                    cg.gain.linearRampToValueAtTime(0, t + 0.18);
+                    osc.start(t); osc.stop(t + 0.2);
+                }, 2600 + Math.random() * 2000);
+                focusActiveNodes.push({ stop: () => clearInterval(chirpInterval) });
+            } else if (name === 'crickets') {
+                // A steady high-pitched pulsing tone over a quiet noise floor.
+                const src = ctx.createBufferSource();
+                src.buffer = makeNoiseBuffer(ctx, 3);
+                src.loop = true;
+                const nFilter = ctx.createBiquadFilter();
+                nFilter.type = 'lowpass'; nFilter.frequency.value = 500;
+                const nGain = ctx.createGain(); nGain.gain.value = 0.08;
+                src.connect(nFilter); nFilter.connect(nGain); nGain.connect(focusMasterGain);
+                src.start();
+                const osc = ctx.createOscillator();
+                osc.type = 'sine'; osc.frequency.value = 4200;
+                const pulseGain = ctx.createGain(); pulseGain.gain.value = 0;
+                osc.connect(pulseGain); pulseGain.connect(focusMasterGain);
+                const lfo = ctx.createOscillator();
+                lfo.type = 'square'; lfo.frequency.value = 5;
+                const lfoGain = ctx.createGain(); lfoGain.gain.value = 0.05;
+                lfo.connect(lfoGain); lfoGain.connect(pulseGain.gain);
+                osc.start(); lfo.start();
+                focusActiveNodes.push(src, nFilter, osc, lfo);
+            } else if (name === 'bowl') {
+                // Long, slowly-decaying harmonic overtones — a meditation singing bowl.
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass'; filter.frequency.value = 2200;
+                filter.connect(focusMasterGain);
+                [220, 330.5, 441.2, 552].forEach((freq, i) => {
+                    const osc = ctx.createOscillator();
+                    osc.type = 'sine'; osc.frequency.value = freq;
+                    const g = ctx.createGain(); g.gain.value = 0.16 / (i + 1);
+                    osc.connect(g); g.connect(filter);
+                    osc.start();
+                    focusActiveNodes.push(osc);
+                });
+                const lfo = ctx.createOscillator();
+                lfo.type = 'sine'; lfo.frequency.value = 0.04;
+                const lfoGain = ctx.createGain(); lfoGain.gain.value = 0.05;
+                const shaperGain = ctx.createGain(); shaperGain.gain.value = 1;
+                lfo.connect(lfoGain); lfoGain.connect(shaperGain.gain);
+                lfo.start();
+                focusActiveNodes.push(lfo, filter);
+            } else if (name === 'chimes') {
+                // A soft ambient pad with randomly-triggered bell-like tones, like wind chimes.
+                const padFilter = ctx.createBiquadFilter();
+                padFilter.type = 'lowpass'; padFilter.frequency.value = 800;
+                padFilter.connect(focusMasterGain);
+                [130.8, 196].forEach(freq => {
+                    const osc = ctx.createOscillator();
+                    osc.type = 'sine'; osc.frequency.value = freq;
+                    const g = ctx.createGain(); g.gain.value = 0.08;
+                    osc.connect(g); g.connect(padFilter);
+                    osc.start();
+                    focusActiveNodes.push(osc);
+                });
+                focusActiveNodes.push(padFilter);
+                const chimeNotes = [523.25, 659.25, 783.99, 987.77, 1046.5];
+                const chimeInterval = setInterval(() => {
+                    if (focusCurrentTrack !== 'chimes') return;
+                    const osc = ctx.createOscillator();
+                    osc.type = 'sine'; osc.frequency.value = chimeNotes[Math.floor(Math.random() * chimeNotes.length)];
+                    const cg = ctx.createGain(); cg.gain.value = 0;
+                    osc.connect(cg); cg.connect(focusMasterGain);
+                    const t = ctx.currentTime;
+                    cg.gain.setValueAtTime(0, t);
+                    cg.gain.linearRampToValueAtTime(0.1, t + 0.05);
+                    cg.gain.exponentialRampToValueAtTime(0.001, t + 2.2);
+                    osc.start(t); osc.stop(t + 2.3);
+                }, 1800 + Math.random() * 2400);
+                focusActiveNodes.push({ stop: () => clearInterval(chimeInterval) });
+            } else if (name === 'cafe') {
+                // Warm, low-mid filtered noise — a soft, unobtrusive coffee-shop hum.
+                const src = ctx.createBufferSource();
+                src.buffer = makeNoiseBuffer(ctx, 3);
+                src.loop = true;
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'bandpass'; filter.frequency.value = 500; filter.Q.value = 0.5;
+                const g = ctx.createGain(); g.gain.value = 0.5;
+                src.connect(filter); filter.connect(g); g.connect(focusMasterGain);
+                src.start();
+                focusActiveNodes.push(src, filter);
             }
             const dot = document.getElementById('sidebar-focus-live-dot');
             if (dot) dot.classList.remove('hidden');
+            updateMiniPlayer();
+        }
+
+        function focusNextTrack() {
+            const idx = focusTrackOrder.indexOf(focusCurrentTrack);
+            const next = focusTrackOrder[(idx + 1 + focusTrackOrder.length) % focusTrackOrder.length];
+            startFocusTrack(next);
+        }
+
+        function focusPrevTrack() {
+            const idx = focusTrackOrder.indexOf(focusCurrentTrack);
+            const prev = focusTrackOrder[(idx - 1 + focusTrackOrder.length) % focusTrackOrder.length];
+            startFocusTrack(prev);
+        }
+
+        /* Small top-of-screen control: true pause/resume (freezes the whole audio
+           context in place) rather than stopping and losing the selected track. */
+        function toggleFocusPlayPause() {
+            if (!focusAudioCtx || !focusCurrentTrack) { openFocusMode(); return; }
+            if (focusAudioCtx.state === 'running') {
+                focusAudioCtx.suspend();
+            } else {
+                focusAudioCtx.resume();
+            }
             updateMiniPlayer();
         }
 
@@ -434,6 +615,7 @@
         </div>
         <div class="flex-1 overflow-y-auto py-4 px-3 space-y-1">
             <div class="sidebar-link active" id="sidebar-link-dashboard" onclick="sidebarGoDashboard()"><i class="fa-solid fa-house w-4 text-center"></i> <span id="txt-sidebar-dashboard">Dashboard</span></div>
+            <div class="sidebar-link" id="sidebar-link-schedule" onclick="sidebarAction('schedule')"><i class="fa-solid fa-calendar-days w-4 text-center text-indigo-300"></i> <span id="txt-sidebar-schedule">Speed Revision 2026</span></div>
             <div class="sidebar-link" id="sidebar-link-leaderboard" onclick="sidebarAction('leaderboard')"><i class="fa-solid fa-trophy w-4 text-center text-yellow-400"></i> <span id="txt-sidebar-leaderboard">Leaderboard</span></div>
             <div class="sidebar-link" id="sidebar-link-game" onclick="sidebarAction('game')"><i class="fa-solid fa-gamepad w-4 text-center text-emerald-400"></i> <span id="txt-sidebar-game">Level Game</span></div>
             <div class="sidebar-link" id="sidebar-link-focus" onclick="sidebarAction('focus')">
@@ -476,7 +658,7 @@
                     <i class="fa-solid fa-bell text-indigo-300"></i>
                     <span id="notif-badge" class="hidden absolute -top-1 -right-1 w-4 h-4 bg-rose-500 notif-dot rounded-full text-[9px] font-bold flex items-center justify-center text-white">0</span>
                 </button>
-                <div id="notif-dropdown" class="hidden pop-in absolute right-0 mt-2 w-72 bg-[#161224] border border-slate-800 rounded-2xl shadow-2xl z-30 overflow-hidden">
+                <div id="notif-dropdown" class="hidden pop-in fixed sm:absolute left-1/2 sm:left-auto -translate-x-1/2 sm:translate-x-0 top-[72px] sm:top-auto right-auto sm:right-0 sm:mt-2 w-[calc(100vw-2rem)] max-w-72 sm:w-72 bg-[#161224] border border-slate-800 rounded-2xl shadow-2xl z-30 overflow-hidden">
                     <div class="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
                         <span class="text-xs font-extrabold text-white" id="notif-panel-title">Notifications</span>
                         <button onclick="closeNotifDropdown()" class="text-slate-500 hover:text-white text-xs cursor-pointer"><i class="fa-solid fa-xmark"></i></button>
@@ -602,8 +784,8 @@
                 </div>
             </div>
 
-            <!-- LIVE CLOCK + FOCUS MODE ENTRY -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <!-- QUICK ACCESS: LIVE CLOCK + SPEED REVISION + FOCUS MODE -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 <div class="lift-card bg-[#161224]/90 backdrop-blur-2xl border border-slate-800/80 p-5 rounded-3xl shadow-xl flex items-center justify-between gap-4">
                     <div class="min-w-0">
                         <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1" id="live-clock-date">--</p>
@@ -613,6 +795,15 @@
                         <i class="fa-regular fa-clock"></i>
                     </div>
                 </div>
+                <button onclick="toggleScheduleView()" class="lift-card shine-btn text-left bg-gradient-to-br from-indigo-950 to-blue-950 border border-indigo-500/30 p-5 rounded-3xl shadow-xl flex items-center justify-between gap-4 cursor-pointer transition">
+                    <div class="min-w-0">
+                        <p class="text-[10px] font-bold text-indigo-300 uppercase tracking-wider mb-1" id="txt-schedule-card-label">Speed Revision 2026</p>
+                        <p class="text-sm sm:text-base font-black text-white" id="txt-schedule-card-sub">16 Week Mega Schedule</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-2xl bg-indigo-600/25 border border-indigo-500/40 text-indigo-300 flex items-center justify-center text-lg shrink-0">
+                        <i class="fa-solid fa-calendar-days"></i>
+                    </div>
+                </button>
                 <button onclick="openFocusMode()" class="lift-card shine-btn text-left bg-gradient-to-br from-indigo-950 to-purple-950 border border-indigo-500/30 p-5 rounded-3xl shadow-xl flex items-center justify-between gap-4 cursor-pointer transition">
                     <div class="min-w-0">
                         <p class="text-[10px] font-bold text-indigo-300 uppercase tracking-wider mb-1" id="txt-focus-mode-label">Focus Mode</p>
@@ -645,19 +836,19 @@
                             <div>
                                 <div class="flex justify-between text-[11px] font-bold text-slate-300 mb-1">
                                     <span id="label-rev-comp">Revision Completed</span>
-                                    <span>40%</span>
+                                    <span id="goals-rev-percent-text">40%</span>
                                 </div>
                                 <div class="w-full bg-[#0f0c1a] h-2 rounded-full overflow-hidden border border-slate-800">
-                                    <div class="bg-indigo-600 h-full w-2/5 rounded-full"></div>
+                                    <div id="goals-rev-bar" class="bg-indigo-600 h-full rounded-full transition-all duration-500" style="width:40%"></div>
                                 </div>
                             </div>
                             <div>
                                 <div class="flex justify-between text-[11px] font-bold text-slate-300 mb-1">
                                     <span id="label-past-papers">Past Papers Solved</span>
-                                    <span>8 / 20</span>
+                                    <span id="goals-papers-text">8 / 20</span>
                                 </div>
                                 <div class="w-full bg-[#0f0c1a] h-2 rounded-full overflow-hidden border border-slate-800">
-                                    <div class="bg-emerald-500 h-full w-2/5 rounded-full"></div>
+                                    <div id="goals-papers-bar" class="bg-emerald-500 h-full rounded-full transition-all duration-500" style="width:40%"></div>
                                 </div>
                             </div>
                         </div>
@@ -671,14 +862,17 @@
                     </div>
                 </div>
             </div>
+        </div>
 
-            <!-- MEGA REVISION SCHEDULE GRID -->
-            <div class="flex justify-between items-center pt-2">
-                <h3 id="sec-schedule-title" class="text-base sm:text-lg font-extrabold text-slate-100 flex items-center gap-2">
-                    <i class="fa-solid fa-calendar-days text-indigo-400"></i> සති 16 ක පුනරීක්ෂණ සැලැස්ම (Revision Weeks)
-                </h3>
+        <!-- SPEED REVISION 2026 — 16 WEEK MEGA REVISION SCHEDULE (dedicated section) -->
+        <div id="schedule-section" class="hidden w-full max-w-6xl space-y-6">
+            <div class="bg-[#161224]/90 backdrop-blur-2xl border border-slate-800/80 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-4 gap-3">
+                    <h2 class="text-lg font-black text-white flex items-center gap-2"><i class="fa-solid fa-calendar-days text-indigo-400"></i> <span id="schedule-section-title">Speed Revision 2026 — 16 Week Mega Schedule</span></h2>
+                    <button onclick="toggleScheduleView()" class="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer transition shrink-0"><i class="fa-solid fa-arrow-left mr-1"></i> <span id="schedule-back">Back</span></button>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4" id="weeks-grid"></div>
             </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4" id="weeks-grid"></div>
         </div>
 
         <!-- LEADERBOARD SECTION -->
@@ -826,6 +1020,27 @@
                                 <select id="admin-graph-scope" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition"></select>
                             </div>
                             <button onclick="saveProgressGraphScope()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg">මූලාශ්‍රය සුරකින්න (Save)</button>
+                        </div>
+
+                        <!-- GOALS & ACHIEVEMENTS SETTINGS -->
+                        <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
+                            <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-bullseye"></i> Goals &amp; Achievements කළමනාකරණය</h3>
+                            <p class="text-[10px] text-slate-500 leading-relaxed">සිසුන්ගේ dashboard එකේ පෙන්නන "Revision Completed" % එකයි "Past Papers Solved" ගණනයි මෙතනින් update කරන්න. සියලුම සිසුන්ටම එකම අගයන් පෙන්වයි.</p>
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div>
+                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Revision %</label>
+                                    <input type="number" id="admin-goals-revision" min="0" max="100" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition">
+                                </div>
+                                <div>
+                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Papers Done</label>
+                                    <input type="number" id="admin-goals-papers-done" min="0" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition">
+                                </div>
+                                <div>
+                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Papers Total</label>
+                                    <input type="number" id="admin-goals-papers-total" min="1" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition">
+                                </div>
+                            </div>
+                            <button onclick="saveGoalsData()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg">Goals සුරකින්න (Save)</button>
                         </div>
                     </div>
                 </div>
@@ -1090,7 +1305,18 @@
 
             <div class="bg-[#161224]/80 backdrop-blur-xl border border-slate-800/80 rounded-3xl p-5 space-y-4 text-left">
                 <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider"><i class="fa-solid fa-music mr-1.5 text-indigo-400"></i> Ambient Sound</p>
-                <div class="grid grid-cols-3 gap-2.5">
+
+                <!-- NOW PLAYING BAR with Prev / Play-Pause / Next -->
+                <div class="flex items-center justify-between gap-3 bg-[#0f0c1a] border border-slate-800 rounded-2xl px-4 py-3">
+                    <button onclick="focusPrevTrack()" class="w-9 h-9 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer transition shrink-0" title="Previous"><i class="fa-solid fa-backward-step"></i></button>
+                    <div class="min-w-0 text-center flex-1">
+                        <p class="text-[9px] font-bold text-indigo-300 uppercase tracking-wider" id="focus-nowplaying-label">Select a Sound</p>
+                        <p id="focus-nowplaying-name" class="text-xs sm:text-sm font-black text-white truncate">—</p>
+                    </div>
+                    <button onclick="focusNextTrack()" class="w-9 h-9 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer transition shrink-0" title="Next"><i class="fa-solid fa-forward-step"></i></button>
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                     <button onclick="playFocusTrack('drone')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="drone">
                         <i class="fa-solid fa-wave-square"></i> Deep Focus
                     </button>
@@ -1099,6 +1325,27 @@
                     </button>
                     <button onclick="playFocusTrack('ocean')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="ocean">
                         <i class="fa-solid fa-water"></i> Ocean Drift
+                    </button>
+                    <button onclick="playFocusTrack('white')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="white">
+                        <i class="fa-solid fa-circle-notch"></i> White Noise
+                    </button>
+                    <button onclick="playFocusTrack('brown')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="brown">
+                        <i class="fa-solid fa-circle"></i> Brown Noise
+                    </button>
+                    <button onclick="playFocusTrack('forest')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="forest">
+                        <i class="fa-solid fa-tree"></i> Forest Morning
+                    </button>
+                    <button onclick="playFocusTrack('crickets')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="crickets">
+                        <i class="fa-solid fa-moon"></i> Night Crickets
+                    </button>
+                    <button onclick="playFocusTrack('bowl')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="bowl">
+                        <i class="fa-solid fa-om"></i> Singing Bowl
+                    </button>
+                    <button onclick="playFocusTrack('chimes')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="chimes">
+                        <i class="fa-solid fa-wind"></i> Wind Chimes
+                    </button>
+                    <button onclick="playFocusTrack('cafe')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="cafe">
+                        <i class="fa-solid fa-mug-hot"></i> Cafe Hum
                     </button>
                 </div>
                 <div class="flex items-center gap-3">
@@ -1140,6 +1387,14 @@
     </footer>
 
     </div> <!-- /#page-shell -->
+
+    <!-- FOCUS MUSIC TOP MINI-CONTROL (small play/pause mark, always reachable) -->
+    <div id="focus-top-indicator" class="hidden fixed top-3 left-1/2 -translate-x-1/2 z-[95] bg-[#161224]/95 backdrop-blur-xl border border-indigo-500/50 rounded-full shadow-2xl pl-1.5 pr-3 py-1.5 flex items-center gap-2 cursor-pointer" onclick="openFocusMode()">
+        <button onclick="event.stopPropagation(); toggleFocusPlayPause();" class="w-7 h-7 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center text-[10px] cursor-pointer transition shrink-0" title="Play/Pause">
+            <i class="fa-solid fa-pause" id="focus-top-icon"></i>
+        </button>
+        <span class="text-[10px] font-bold text-indigo-200 whitespace-nowrap">🎧 <span id="focus-top-track-name">Focus Music</span></span>
+    </div>
 
     <!-- FOCUS MODE MINI PLAYER (persists across the app while ambient audio is playing) -->
     <div id="focus-mini-player" class="hidden fixed bottom-5 left-5 z-[90] bg-[#161224]/95 backdrop-blur-xl border border-indigo-500/40 rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 max-w-xs cursor-pointer" onclick="openFocusMode()">
@@ -1225,6 +1480,7 @@
             if (data.notifications) { notifications = data.notifications; localStorage.setItem('moramaths_notifications', JSON.stringify(notifications)); }
             if (data.siteAssets) { siteAssets = data.siteAssets; localStorage.setItem('moramaths_site_assets', JSON.stringify(siteAssets)); }
             if (data.progressGraphConfig) { progressGraphConfig = data.progressGraphConfig; localStorage.setItem('moramaths_progress_config', JSON.stringify(progressGraphConfig)); }
+            if (data.goalsData) { goalsData = data.goalsData; localStorage.setItem('moramaths_goals_data', JSON.stringify(goalsData)); }
             // Keep the logged-in user's own record (quiz scores, streak, game progress) fresh too,
             // in case it changed from another device.
             if (typeof currentUser !== 'undefined' && currentUser) {
@@ -1238,7 +1494,7 @@
         function cloudPush() {
             if (!firebaseReady || suppressCloudPush || !cloudDocRef) return;
             cloudDocRef.set({
-                users, weeksData, zoomData, notifications, siteAssets, progressGraphConfig,
+                users, weeksData, zoomData, notifications, siteAssets, progressGraphConfig, goalsData,
                 updatedAt: Date.now()
             }, { merge: true }).catch(err => console.warn('Cloud sync push failed:', err));
         }
@@ -1256,6 +1512,7 @@
                 } else {
                     if (typeof setupStudentDashboard === 'function') setupStudentDashboard();
                     if (typeof renderChart === 'function') renderChart();
+                    if (typeof renderGoals === 'function') renderGoals();
                 }
                 if (typeof renderNotifBell === 'function') renderNotifBell();
             }
@@ -1543,6 +1800,11 @@
                 goalsFooter: "අමතර ප්‍රශ්න පත්‍ර සහ Model Papers සඳහා පහත සති පරීක්ෂා කරන්න.",
                 leaderboardBtn: "ශ්‍රේණිගත කිරීම",
                 sidebarDashboard: "මුල් පිටුව",
+                sidebarSchedule: "වේග පුනරීක්ෂණ 2026",
+                scheduleCardLabel: "වේග පුනරීක්ෂණ 2026",
+                scheduleCardSub: "සති 16 මෙගා කාලසටහන",
+                scheduleSectionTitle: "වේග පුනරීක්ෂණ 2026 — සති 16 මෙගා කාලසටහන",
+                scheduleBack: "ආපසු",
                 sidebarFocus: "අවධානය (Focus)",
                 sidebarAccount: "ගිණුම",
                 sidebarProfile: "මගේ Profile",
@@ -1602,6 +1864,11 @@
                 goalsFooter: "Check out the weeks below for extra model papers and worksheets.",
                 leaderboardBtn: "Leaderboard",
                 sidebarDashboard: "Dashboard",
+                sidebarSchedule: "Speed Revision 2026",
+                scheduleCardLabel: "Speed Revision 2026",
+                scheduleCardSub: "16 Week Mega Schedule",
+                scheduleSectionTitle: "Speed Revision 2026 — 16 Week Mega Schedule",
+                scheduleBack: "Back",
                 sidebarFocus: "Focus Mode",
                 sidebarAccount: "Account",
                 sidebarProfile: "My Profile",
@@ -1715,6 +1982,7 @@
            the app data. scope: 'all' shows every attempted quiz combined; a numeric
            string (e.g. "2") restricts the graph to quizzes belonging to that week index. */
         let progressGraphConfig = JSON.parse(localStorage.getItem('moramaths_progress_config')) || { scope: 'all' };
+        let goalsData = JSON.parse(localStorage.getItem('moramaths_goals_data')) || { revisionPercent: 40, papersDone: 8, papersTotal: 20 };
 
         /* Custom-built SVG illustration used on the login screen when no admin image is set. */
         const defaultHeroIllustrationSVG = `
@@ -1809,9 +2077,13 @@
                 ? "<b>OTP email එවෙන්නේ නෑ:</b> ඔබ මේ file එක කෙලින්ම (file:///...) open කර ඇත. EmailJS වැඩ කරන්නේ http/https හරහා විවෘත කළ page එකකින් විතරයි — VS Code Live Server, 'python -m http.server' වගේ local server එකකින්, හෝ Netlify/GitHub Pages වගේ තැනකට host කරලා try කරන්න."
                 : "<b>OTP emails won't send:</b> you're opening this file directly (file:///...). EmailJS only works from a page served over http/https — try VS Code's Live Server, a local server like 'python -m http.server', or hosting it on Netlify/GitHub Pages.";
             document.getElementById('student-portal-subtitle').innerText = t.studentPortalSub;
-            document.getElementById('sec-schedule-title').innerHTML = `<i class="fa-solid fa-calendar-days text-indigo-400"></i> ${t.secSchedule}`;
             document.getElementById('txt-logout-btn').innerText = t.logout;
             document.getElementById('txt-sidebar-dashboard').innerText = t.sidebarDashboard;
+            document.getElementById('txt-sidebar-schedule').innerText = t.sidebarSchedule;
+            document.getElementById('txt-schedule-card-label').innerText = t.scheduleCardLabel;
+            document.getElementById('txt-schedule-card-sub').innerText = t.scheduleCardSub;
+            document.getElementById('schedule-section-title').innerText = t.scheduleSectionTitle;
+            document.getElementById('schedule-back').innerText = t.scheduleBack;
             document.getElementById('txt-sidebar-focus').innerText = t.sidebarFocus;
             document.getElementById('txt-sidebar-account').innerText = t.sidebarAccount;
             document.getElementById('txt-sidebar-profile').innerText = t.sidebarProfile;
@@ -1900,6 +2172,7 @@
             loadRandomQuote();
             document.getElementById('leaderboard-section').classList.add('hidden');
             document.getElementById('game-section').classList.add('hidden');
+            document.getElementById('schedule-section').classList.add('hidden');
             if (currentUser) {
                 document.getElementById('auth-screen-flex').classList.add('hidden');
                 document.getElementById('auth-container').classList.add('hidden');
@@ -1922,6 +2195,7 @@
                     renderAdminAppearanceForm();
                     renderAdminNotifManageList();
                     populateAdminGraphScopeSelect();
+                    loadAdminGoalsForm();
                     document.getElementById('admin-role-badge').innerText = isMasterAdmin(currentUser) ? 'Master Admin' : 'Admin';
                     document.querySelectorAll('.master-admin-only').forEach(el => el.classList.toggle('hidden', !isMasterAdmin(currentUser)));
                 } else {
@@ -2136,6 +2410,43 @@
                 <a href="${zoomData.link}" target="_blank" class="block text-center bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-lg">${t.zoomJoin}</a>
             `;
             updateStudyStreak();
+            renderGoals();
+        }
+
+        /* ============ GOALS & ACHIEVEMENTS (admin-controlled) ============ */
+        function renderGoals() {
+            const rev = Math.max(0, Math.min(100, Number(goalsData.revisionPercent) || 0));
+            const done = Math.max(0, Number(goalsData.papersDone) || 0);
+            const total = Math.max(1, Number(goalsData.papersTotal) || 1);
+            const papersPct = Math.max(0, Math.min(100, (done / total) * 100));
+            const revBar = document.getElementById('goals-rev-bar');
+            const revText = document.getElementById('goals-rev-percent-text');
+            const papersBar = document.getElementById('goals-papers-bar');
+            const papersText = document.getElementById('goals-papers-text');
+            if (revBar) revBar.style.width = rev + '%';
+            if (revText) revText.innerText = rev + '%';
+            if (papersBar) papersBar.style.width = papersPct + '%';
+            if (papersText) papersText.innerText = `${done} / ${total}`;
+        }
+
+        function saveGoalsData() {
+            const rev = Number(document.getElementById('admin-goals-revision').value);
+            const done = Number(document.getElementById('admin-goals-papers-done').value);
+            const total = Number(document.getElementById('admin-goals-papers-total').value);
+            if (isNaN(rev) || isNaN(done) || isNaN(total) || total < 1) { showToast("Please enter valid numbers", 'error'); return; }
+            goalsData = { revisionPercent: Math.max(0, Math.min(100, rev)), papersDone: Math.max(0, done), papersTotal: Math.max(1, total) };
+            localStorage.setItem('moramaths_goals_data', JSON.stringify(goalsData));
+            cloudPush();
+            showToast("Goals & Achievements updated!", 'success');
+        }
+
+        function loadAdminGoalsForm() {
+            const r = document.getElementById('admin-goals-revision');
+            const d = document.getElementById('admin-goals-papers-done');
+            const t = document.getElementById('admin-goals-papers-total');
+            if (r) r.value = goalsData.revisionPercent;
+            if (d) d.value = goalsData.papersDone;
+            if (t) t.value = goalsData.papersTotal;
         }
 
         /* ============ STUDY STREAK (auto-tracked daily login streak) ============ */
@@ -2306,12 +2617,12 @@
             w.lessons.forEach(l => {
                 const scored = currentUser && currentUser.quizScores && currentUser.quizScores[l.id];
                 list.innerHTML += `
-                    <div class="bg-[#0f0c1a] border border-slate-800 p-4 rounded-2xl flex items-center justify-between gap-3 shadow-inner flex-wrap">
-                        <span class="text-xs font-bold text-white line-clamp-1">${escapeHtml(l.title)}</span>
-                        <div class="flex gap-2 shrink-0 flex-wrap">
-                            <button onclick="viewLessonCode('${l.id}')" class="bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white text-[10px] font-bold px-3 py-1.5 rounded-xl border border-purple-500/30 transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer" title="Full-Screen Viewer"><i class="fa-solid fa-expand"></i> View</button>
-                            <a href="${l.pdf}" target="_blank" class="bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white text-[10px] font-bold px-3 py-1.5 rounded-xl border border-indigo-500/30 transition flex items-center gap-1.5 whitespace-nowrap"><i class="fa-solid fa-file-pdf"></i> ${t.pdfBtn}</a>
-                            <button onclick="openQuizModal('${l.id}')" class="bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white text-[10px] font-bold px-3 py-1.5 rounded-xl border border-emerald-500/30 transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer"><i class="fa-solid fa-circle-question"></i> ${t.quizBtn}${scored ? ` ✓${scored.correct}/${scored.total}` : ''}</button>
+                    <div class="bg-[#0f0c1a] border border-slate-800 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-inner">
+                        <span class="text-xs font-bold text-white sm:line-clamp-1 sm:flex-1 sm:min-w-0">${escapeHtml(l.title)}</span>
+                        <div class="grid grid-cols-3 sm:flex gap-2 shrink-0">
+                            <button onclick="viewLessonCode('${l.id}')" class="bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white text-[10px] font-bold px-2 sm:px-3 py-1.5 rounded-xl border border-purple-500/30 transition flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer" title="Full-Screen Viewer"><i class="fa-solid fa-expand"></i> <span class="hidden xs:inline sm:inline">View</span></button>
+                            <a href="${l.pdf}" target="_blank" class="bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white text-[10px] font-bold px-2 sm:px-3 py-1.5 rounded-xl border border-indigo-500/30 transition flex items-center justify-center gap-1.5 whitespace-nowrap">${t.pdfBtn}</a>
+                            <button onclick="openQuizModal('${l.id}')" class="bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white text-[10px] font-bold px-2 sm:px-3 py-1.5 rounded-xl border border-emerald-500/30 transition flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer">${t.quizBtn}${scored ? ` ✓${scored.correct}/${scored.total}` : ''}</button>
                         </div>
                     </div>
                 `;
@@ -2381,7 +2692,7 @@
             const select = document.getElementById('admin-target-week');
             select.innerHTML = '';
             weeksData.forEach((w, idx) => {
-                select.innerHTML += `<option value="${idx}">Week ${w.week} - ${w.title}</option>`;
+                select.innerHTML += `<option value="${idx}">Week ${w.week} - ${escapeHtml(w.title)}</option>`;
             });
         }
 
@@ -2698,15 +3009,35 @@
             const board = document.getElementById('leaderboard-section');
             const dash = document.getElementById('student-dashboard');
             const gameSec = document.getElementById('game-section');
+            const scheduleSec = document.getElementById('schedule-section');
             const showingBoard = board.classList.contains('hidden');
             if (showingBoard) {
                 renderLeaderboard();
                 board.classList.remove('hidden');
                 if (gameSec) gameSec.classList.add('hidden');
+                if (scheduleSec) scheduleSec.classList.add('hidden');
                 if (dash) dash.classList.add('hidden');
             } else {
                 board.classList.add('hidden');
                 if (currentUser && currentUser.username !== 'admin' && dash) dash.classList.remove('hidden');
+            }
+        }
+
+        function toggleScheduleView() {
+            const scheduleSec = document.getElementById('schedule-section');
+            const dash = document.getElementById('student-dashboard');
+            const board = document.getElementById('leaderboard-section');
+            const gameSec = document.getElementById('game-section');
+            const showing = scheduleSec.classList.contains('hidden');
+            if (showing) {
+                renderWeeksGrid();
+                scheduleSec.classList.remove('hidden');
+                if (board) board.classList.add('hidden');
+                if (gameSec) gameSec.classList.add('hidden');
+                if (dash) dash.classList.add('hidden');
+            } else {
+                scheduleSec.classList.add('hidden');
+                if (currentUser && !isAdminUser(currentUser) && dash) dash.classList.remove('hidden');
             }
         }
 
@@ -2735,9 +3066,11 @@
             const dash = document.getElementById('student-dashboard');
             const admin = document.getElementById('admin-panel');
             const board = document.getElementById('leaderboard-section');
+            const scheduleSec = document.getElementById('schedule-section');
             const showing = gameSec.classList.contains('hidden');
             if (showing) {
                 if (board) board.classList.add('hidden');
+                if (scheduleSec) scheduleSec.classList.add('hidden');
                 backToGameLevels();
                 gameSec.classList.remove('hidden');
                 if (dash) dash.classList.add('hidden');
@@ -2980,7 +3313,7 @@
             wrap.innerHTML = weeksData.map((w, wi) => `
                 <div class="bg-[#0f0c1a] border border-slate-800 rounded-2xl p-4 space-y-3 shadow-inner">
                     <div class="flex items-center justify-between gap-2">
-                        <input value="${w.title}" onchange="renameWeek(${wi}, this.value)" class="bg-transparent text-xs font-extrabold text-white flex-1 min-w-0 focus:outline-none focus:border-b focus:border-indigo-500">
+                        <input value="${escapeHtml(w.title)}" onchange="renameWeek(${wi}, this.value)" class="bg-transparent text-xs font-extrabold text-white flex-1 min-w-0 focus:outline-none focus:border-b focus:border-indigo-500">
                         <button onclick="toggleWeekLock(${wi})" class="shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-lg border ${w.isLocked ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'} cursor-pointer transition">
                             <i class="fa-solid ${w.isLocked ? 'fa-lock' : 'fa-unlock'}"></i> ${w.isLocked ? 'Locked' : 'Unlocked'}
                         </button>
@@ -2988,7 +3321,7 @@
                     <div class="space-y-1.5">
                         ${w.lessons.map(l => `
                             <div class="flex items-center justify-between gap-2 bg-[#161224] border border-slate-800 rounded-xl px-3 py-2">
-                                <span class="text-[11px] text-slate-300 truncate flex-1">${l.title} ${l.quiz && l.quiz.length ? `<span class="text-indigo-400">(${l.quiz.length}Q)</span>` : ''}</span>
+                                <span class="text-[11px] text-slate-300 truncate flex-1">${escapeHtml(l.title)} ${l.quiz && l.quiz.length ? `<span class="text-indigo-400">(${l.quiz.length}Q)</span>` : ''}</span>
                                 <div class="flex gap-1.5 shrink-0">
                                     <button onclick="openLessonEditModal('${l.id}')" class="w-6 h-6 rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid fa-pen"></i></button>
                                     <button onclick="deleteLesson('${l.id}')" class="w-6 h-6 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid fa-trash"></i></button>
@@ -3078,7 +3411,7 @@
         function populateQuizWeekSelect() {
             const select = document.getElementById('quiz-target-week');
             if (!select) return;
-            select.innerHTML = weeksData.map((w, idx) => `<option value="${idx}">Week ${w.week} - ${w.title}</option>`).join('');
+            select.innerHTML = weeksData.map((w, idx) => `<option value="${idx}">Week ${w.week} - ${escapeHtml(w.title)}</option>`).join('');
             populateQuizLessonSelect();
         }
 
@@ -3086,7 +3419,7 @@
             const weekIdx = document.getElementById('quiz-target-week').value;
             const select = document.getElementById('quiz-target-lesson');
             const lessons = weeksData[weekIdx] ? weeksData[weekIdx].lessons : [];
-            select.innerHTML = lessons.map(l => `<option value="${l.id}">${l.title}</option>`).join('') || '<option value="">No lessons in this week</option>';
+            select.innerHTML = lessons.map(l => `<option value="${l.id}">${escapeHtml(l.title)}</option>`).join('') || '<option value="">No lessons in this week</option>';
             renderQuizQuestionsList();
         }
 
@@ -3115,7 +3448,7 @@
             if (!lesson || !lesson.quiz.length) { wrap.innerHTML = '<p class="text-[10px] text-slate-600 italic">No questions yet for this lesson.</p>'; return; }
             wrap.innerHTML = lesson.quiz.map((q, qi) => `
                 <div class="flex items-center justify-between gap-2 bg-[#161224] border border-slate-800 rounded-xl px-3 py-2">
-                    <span class="text-[11px] text-slate-300 truncate">${qi + 1}. ${q.q}</span>
+                    <span class="text-[11px] text-slate-300 truncate">${qi + 1}. ${escapeHtml(q.q)}</span>
                     <button onclick="deleteQuizQuestion('${lessonId}', ${qi})" class="w-6 h-6 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition shrink-0"><i class="fa-solid fa-trash"></i></button>
                 </div>
             `).join('');
