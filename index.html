@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MoraMaths - Advanced O/L Speed Revision & LMS Portal | University of Moratuwa</title>
+    <title>MathLab By Sithum Munasinghe - Advanced O/L Speed Revision & LMS Portal</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -131,8 +131,8 @@
     <script>
         /* Bump this on every meaningful release so it's easy to tell which build
            is running (shown in the nav badge, footer, and this console line). */
-        const APP_VERSION = "2.0.0";
-        console.log(`%cMoraMaths Mega Edition v${APP_VERSION}`, 'color:#818cf8;font-weight:bold;font-size:12px;');
+        const APP_VERSION = "3.0.0";
+        console.log(`%cMathLab By Sithum Munasinghe v${APP_VERSION}`, 'color:#818cf8;font-weight:bold;font-size:12px;');
 
         /* Live clock shown on the student dashboard — updates every second. Safe to run
            even when the dashboard is hidden/not yet rendered (the elements still exist
@@ -203,9 +203,13 @@
             const board = document.getElementById('leaderboard-section');
             const gameSec = document.getElementById('game-section');
             const scheduleSec = document.getElementById('schedule-section');
+            const papersSec = document.getElementById('pastpapers-section');
+            const contactSec = document.getElementById('contact-section');
             if (board && !board.classList.contains('hidden')) toggleLeaderboardView();
             if (gameSec && !gameSec.classList.contains('hidden')) toggleGameView();
             if (scheduleSec && !scheduleSec.classList.contains('hidden')) toggleScheduleView();
+            if (papersSec && !papersSec.classList.contains('hidden')) togglePastPapersView();
+            if (contactSec && !contactSec.classList.contains('hidden')) toggleContactView();
             setSidebarActive('sidebar-link-dashboard');
         }
 
@@ -215,12 +219,15 @@
             else if (which === 'game') { toggleGameView(); setSidebarActive('sidebar-link-game'); }
             else if (which === 'focus') { openFocusMode(); setSidebarActive('sidebar-link-focus'); }
             else if (which === 'schedule') { toggleScheduleView(); setSidebarActive('sidebar-link-schedule'); }
+            else if (which === 'pastpapers') { togglePastPapersView(); setSidebarActive('sidebar-link-pastpapers'); }
+            else if (which === 'contact') { toggleContactView(); setSidebarActive('sidebar-link-contact'); }
         }
 
         function openFocusMode() {
             document.getElementById('focus-mode-modal').classList.remove('hidden');
             document.body.style.overflow = 'hidden';
             updateMiniPlayer();
+            switchSongPlaylistTab(activeSongLang || 'english');
         }
         function closeFocusMode() {
             document.getElementById('focus-mode-modal').classList.add('hidden');
@@ -249,9 +256,11 @@
         const focusTrackLabels = {
             drone: 'Deep Focus', rain: 'Rainy Night', ocean: 'Ocean Drift', white: 'White Noise',
             brown: 'Brown Noise', forest: 'Forest Morning', crickets: 'Night Crickets',
-            bowl: 'Singing Bowl', chimes: 'Wind Chimes', cafe: 'Cafe Hum'
+            bowl: 'Singing Bowl', chimes: 'Wind Chimes', cafe: 'Cafe Hum',
+            piano: 'Soft Piano Ambience', strings: 'Warm Strings Pad', guitar: 'Acoustic Guitar Pluck',
+            lofi: 'Lofi Chill Beats', jazz: 'Coffee Shop Jazz', synthwave: 'Night Synth Focus'
         };
-        const focusTrackOrder = ['drone', 'rain', 'ocean', 'white', 'brown', 'forest', 'crickets', 'bowl', 'chimes', 'cafe'];
+        const focusTrackOrder = ['drone', 'rain', 'ocean', 'white', 'brown', 'forest', 'crickets', 'bowl', 'chimes', 'cafe', 'piano', 'strings', 'guitar', 'lofi', 'jazz', 'synthwave'];
 
         /* Shows/hides the small floating "Now Playing" bar (bottom-left) that lets the
            ambient track keep going while the user is elsewhere in the app. */
@@ -315,6 +324,7 @@
             ensureFocusAudio();
             if (focusAudioCtx.state === 'suspended') focusAudioCtx.resume();
             stopFocusTrack();
+            stopSongPlayer();
             focusCurrentTrack = name;
             document.querySelectorAll('.focus-track-btn').forEach(b => {
                 b.classList.toggle('bg-indigo-600/30', b.dataset.track === name);
@@ -492,6 +502,178 @@
                 src.connect(filter); filter.connect(g); g.connect(focusMasterGain);
                 src.start();
                 focusActiveNodes.push(src, filter);
+            } else if (name === 'piano') {
+                // Ambient instrumental #1: soft pentatonic "wind chime piano" — single
+                // plucked notes (sine + quick decay, like a soft felt piano) drifting in
+                // at random times over a very quiet sustained pad.
+                const padFilter = ctx.createBiquadFilter();
+                padFilter.type = 'lowpass'; padFilter.frequency.value = 700;
+                padFilter.connect(focusMasterGain);
+                [130.8, 196, 261.6].forEach(freq => {
+                    const osc = ctx.createOscillator();
+                    osc.type = 'sine'; osc.frequency.value = freq;
+                    const g = ctx.createGain(); g.gain.value = 0.05;
+                    osc.connect(g); g.connect(padFilter);
+                    osc.start();
+                    focusActiveNodes.push(osc);
+                });
+                focusActiveNodes.push(padFilter);
+                const pentatonic = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33];
+                const noteInterval = setInterval(() => {
+                    if (focusCurrentTrack !== 'piano') return;
+                    const osc = ctx.createOscillator();
+                    osc.type = 'triangle'; osc.frequency.value = pentatonic[Math.floor(Math.random() * pentatonic.length)];
+                    const cg = ctx.createGain(); cg.gain.value = 0;
+                    osc.connect(cg); cg.connect(focusMasterGain);
+                    const t = ctx.currentTime;
+                    cg.gain.setValueAtTime(0, t);
+                    cg.gain.linearRampToValueAtTime(0.14, t + 0.02);
+                    cg.gain.exponentialRampToValueAtTime(0.001, t + 1.8);
+                    osc.start(t); osc.stop(t + 1.9);
+                }, 1600 + Math.random() * 1400);
+                focusActiveNodes.push({ stop: () => clearInterval(noteInterval) });
+            } else if (name === 'strings') {
+                // Ambient instrumental #2: a warm, slowly-swelling string-ensemble pad —
+                // several detuned triangle oscillators through a gently breathing filter.
+                const filter = ctx.createBiquadFilter();
+                filter.type = 'lowpass'; filter.frequency.value = 900;
+                filter.connect(focusMasterGain);
+                [174.6, 220, 261.6, 329.6].forEach(freq => {
+                    const osc = ctx.createOscillator();
+                    osc.type = 'triangle'; osc.frequency.value = freq;
+                    const detune = ctx.createOscillator();
+                    detune.type = 'triangle'; detune.frequency.value = freq * 1.006;
+                    const g = ctx.createGain(); g.gain.value = 0.09;
+                    osc.connect(g); detune.connect(g); g.connect(filter);
+                    osc.start(); detune.start();
+                    focusActiveNodes.push(osc, detune);
+                });
+                const lfo = ctx.createOscillator();
+                lfo.type = 'sine'; lfo.frequency.value = 0.05;
+                const lfoGain = ctx.createGain(); lfoGain.gain.value = 350;
+                lfo.connect(lfoGain); lfoGain.connect(filter.frequency);
+                lfo.start();
+                focusActiveNodes.push(lfo, filter);
+            } else if (name === 'guitar') {
+                // Ambient instrumental #3: a slow fingerstyle-guitar-like arpeggio —
+                // four plucked notes looping gently, soft attack and natural decay.
+                const arpNotes = [220, 261.63, 329.63, 440.0];
+                let arpStep = 0;
+                const pluckOne = () => {
+                    if (focusCurrentTrack !== 'guitar') return;
+                    const osc = ctx.createOscillator();
+                    osc.type = 'triangle'; osc.frequency.value = arpNotes[arpStep % arpNotes.length];
+                    arpStep++;
+                    const cg = ctx.createGain(); cg.gain.value = 0;
+                    osc.connect(cg); cg.connect(focusMasterGain);
+                    const t = ctx.currentTime;
+                    cg.gain.setValueAtTime(0, t);
+                    cg.gain.linearRampToValueAtTime(0.12, t + 0.015);
+                    cg.gain.exponentialRampToValueAtTime(0.001, t + 1.1);
+                    osc.start(t); osc.stop(t + 1.2);
+                };
+                pluckOne();
+                const arpInterval = setInterval(pluckOne, 620);
+                focusActiveNodes.push({ stop: () => clearInterval(arpInterval) });
+            } else if (name === 'lofi') {
+                // English study-playlist style #1: gentle lofi hip-hop-style instrumental
+                // beat — soft kick + hat pulse under a mellow chord pad, chill tempo.
+                const padFilter = ctx.createBiquadFilter();
+                padFilter.type = 'lowpass'; padFilter.frequency.value = 800;
+                padFilter.connect(focusMasterGain);
+                [174.6, 220, 261.6].forEach(freq => {
+                    const osc = ctx.createOscillator();
+                    osc.type = 'sine'; osc.frequency.value = freq;
+                    const g = ctx.createGain(); g.gain.value = 0.07;
+                    osc.connect(g); g.connect(padFilter);
+                    osc.start();
+                    focusActiveNodes.push(osc);
+                });
+                focusActiveNodes.push(padFilter);
+                let beatStep = 0;
+                const beatInterval = setInterval(() => {
+                    if (focusCurrentTrack !== 'lofi') return;
+                    const t = ctx.currentTime;
+                    if (beatStep % 4 === 0 || beatStep % 4 === 2) {
+                        const kick = ctx.createOscillator();
+                        kick.type = 'sine'; kick.frequency.setValueAtTime(120, t);
+                        kick.frequency.exponentialRampToValueAtTime(45, t + 0.15);
+                        const kg = ctx.createGain(); kg.gain.value = 0.35;
+                        kg.gain.setValueAtTime(0.35, t); kg.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+                        kick.connect(kg); kg.connect(focusMasterGain);
+                        kick.start(t); kick.stop(t + 0.22);
+                    }
+                    if (beatStep % 2 === 1) {
+                        const hat = ctx.createBufferSource();
+                        hat.buffer = makeNoiseBuffer(ctx, 0.1);
+                        const hf = ctx.createBiquadFilter(); hf.type = 'highpass'; hf.frequency.value = 6000;
+                        const hg = ctx.createGain(); hg.gain.value = 0.06;
+                        hat.connect(hf); hf.connect(hg); hg.connect(focusMasterGain);
+                        hat.start(t); hat.stop(t + 0.05);
+                    }
+                    beatStep++;
+                }, 375);
+                focusActiveNodes.push({ stop: () => clearInterval(beatInterval) });
+            } else if (name === 'jazz') {
+                // English study-playlist style #2: soft coffee-shop jazz instrumental —
+                // a slow walking bassline under a warm sustained chord pad.
+                const padFilter = ctx.createBiquadFilter();
+                padFilter.type = 'lowpass'; padFilter.frequency.value = 1000;
+                padFilter.connect(focusMasterGain);
+                [196, 246.9, 293.7].forEach(freq => {
+                    const osc = ctx.createOscillator();
+                    osc.type = 'triangle'; osc.frequency.value = freq;
+                    const g = ctx.createGain(); g.gain.value = 0.05;
+                    osc.connect(g); g.connect(padFilter);
+                    osc.start();
+                    focusActiveNodes.push(osc);
+                });
+                focusActiveNodes.push(padFilter);
+                const bassNotes = [98, 110, 87.3, 98];
+                let bassStep = 0;
+                const bassInterval = setInterval(() => {
+                    if (focusCurrentTrack !== 'jazz') return;
+                    const osc = ctx.createOscillator();
+                    osc.type = 'sine'; osc.frequency.value = bassNotes[bassStep % bassNotes.length];
+                    bassStep++;
+                    const cg = ctx.createGain(); cg.gain.value = 0;
+                    osc.connect(cg); cg.connect(focusMasterGain);
+                    const t = ctx.currentTime;
+                    cg.gain.setValueAtTime(0, t);
+                    cg.gain.linearRampToValueAtTime(0.18, t + 0.02);
+                    cg.gain.exponentialRampToValueAtTime(0.001, t + 0.75);
+                    osc.start(t); osc.stop(t + 0.8);
+                }, 820);
+                focusActiveNodes.push({ stop: () => clearInterval(bassInterval) });
+            } else if (name === 'synthwave') {
+                // English study-playlist style #3: mellow retro-synth arpeggio over a
+                // slow-moving bass pulse — a calmer, instrumental take on synthwave.
+                const bassOsc = ctx.createOscillator();
+                bassOsc.type = 'sine'; bassOsc.frequency.value = 65.4;
+                const bassGain = ctx.createGain(); bassGain.gain.value = 0.16;
+                bassOsc.connect(bassGain); bassGain.connect(focusMasterGain);
+                bassOsc.start();
+                focusActiveNodes.push(bassOsc);
+                const arpFilter = ctx.createBiquadFilter();
+                arpFilter.type = 'lowpass'; arpFilter.frequency.value = 1400;
+                arpFilter.connect(focusMasterGain);
+                focusActiveNodes.push(arpFilter);
+                const arpNotes = [261.6, 311.1, 392.0, 466.2];
+                let step = 0;
+                const arpInterval = setInterval(() => {
+                    if (focusCurrentTrack !== 'synthwave') return;
+                    const osc = ctx.createOscillator();
+                    osc.type = 'sawtooth'; osc.frequency.value = arpNotes[step % arpNotes.length];
+                    step++;
+                    const cg = ctx.createGain(); cg.gain.value = 0;
+                    osc.connect(cg); cg.connect(arpFilter);
+                    const t = ctx.currentTime;
+                    cg.gain.setValueAtTime(0, t);
+                    cg.gain.linearRampToValueAtTime(0.06, t + 0.01);
+                    cg.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+                    osc.start(t); osc.stop(t + 0.32);
+                }, 340);
+                focusActiveNodes.push({ stop: () => clearInterval(arpInterval) });
             }
             const dot = document.getElementById('sidebar-focus-live-dot');
             if (dot) dot.classList.remove('hidden');
@@ -508,6 +690,101 @@
             const idx = focusTrackOrder.indexOf(focusCurrentTrack);
             const prev = focusTrackOrder[(idx - 1 + focusTrackOrder.length) % focusTrackOrder.length];
             startFocusTrack(prev);
+        }
+
+        /* ============ SONG PLAYLISTS (real songs, played via YouTube's official embedded
+           player — the admin adds the links; nothing here reproduces or hosts any actual
+           song audio, it just points the official YouTube player at the video the admin chose). */
+        let activeSongLang = 'english';
+
+        function extractYouTubeId(url) {
+            if (!url) return '';
+            const m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/);
+            return m ? m[1] : '';
+        }
+
+        function switchSongPlaylistTab(lang) {
+            activeSongLang = lang;
+            ['english', 'sinhala', 'hindi'].forEach(l => {
+                const btn = document.getElementById(`song-tab-${l}`);
+                if (!btn) return;
+                const active = l === lang;
+                btn.className = `song-tab-btn flex-1 text-[10px] font-bold py-2 rounded-xl transition cursor-pointer ${active ? 'bg-indigo-600/30 border border-indigo-500/60 text-white' : 'bg-[#0f0c1a] border border-slate-800 text-slate-300'}`;
+            });
+            renderSongPlaylistList();
+        }
+
+        function renderSongPlaylistList() {
+            const wrap = document.getElementById('song-playlist-list');
+            if (!wrap) return;
+            const songs = (songPlaylists[activeSongLang] || []);
+            if (!songs.length) {
+                wrap.innerHTML = `<p class="text-[10px] text-slate-600 italic py-2">${currentLang === 'si' ? 'තවම songs එකතු කර නැත.' : 'No songs added for this list yet.'}</p>`;
+                return;
+            }
+            wrap.innerHTML = songs.map(s => `
+                <button onclick="playSongPlaylistItem('${escapeHtml(s.id)}')" class="w-full flex items-center gap-2.5 bg-[#0f0c1a] hover:bg-indigo-600/15 border border-slate-800 hover:border-indigo-500/40 rounded-xl px-3.5 py-2.5 text-left transition cursor-pointer">
+                    <i class="fa-brands fa-youtube text-rose-400"></i>
+                    <span class="text-xs font-bold text-slate-200 truncate flex-1">${escapeHtml(s.title)}</span>
+                    <i class="fa-solid fa-play text-[9px] text-slate-500"></i>
+                </button>
+            `).join('');
+        }
+
+        function playSongPlaylistItem(songId) {
+            const song = (songPlaylists[activeSongLang] || []).find(s => s.id === songId);
+            if (!song) return;
+            stopFocusTrack(); // don't overlap a real song with a generated ambient tone
+            const wrap = document.getElementById('song-player-wrap');
+            const iframe = document.getElementById('song-player-iframe');
+            iframe.src = `https://www.youtube.com/embed/${song.videoId}?autoplay=1`;
+            wrap.classList.remove('hidden');
+        }
+
+        function stopSongPlayer() {
+            const wrap = document.getElementById('song-player-wrap');
+            const iframe = document.getElementById('song-player-iframe');
+            if (!wrap || !iframe) return;
+            iframe.src = '';
+            wrap.classList.add('hidden');
+        }
+
+        /* ============ ADMIN: SONG PLAYLISTS MANAGER ============ */
+        function renderAdminSongPlaylists() {
+            ['english', 'sinhala', 'hindi'].forEach(lang => {
+                const wrap = document.getElementById(`admin-songs-${lang}`);
+                if (!wrap) return;
+                const songs = songPlaylists[lang] || [];
+                wrap.innerHTML = (songs.length ? songs.map(s => `
+                    <div class="flex items-center justify-between gap-2 bg-[#161224]/60 border border-slate-800 rounded-lg px-3 py-2">
+                        <span class="text-[11px] font-bold text-slate-200 truncate">${escapeHtml(s.title)}</span>
+                        <button onclick="deleteSongFromPlaylist('${lang}', '${s.id}')" class="w-6 h-6 rounded-md bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white flex items-center justify-center text-[9px] cursor-pointer transition"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                `).join('') : '<p class="text-[10px] text-slate-600 italic">No songs added yet.</p>');
+            });
+        }
+
+        function addSongToPlaylist(lang) {
+            const titleEl = document.getElementById(`admin-song-title-${lang}`);
+            const urlEl = document.getElementById(`admin-song-url-${lang}`);
+            const title = titleEl.value.trim();
+            const url = urlEl.value.trim();
+            const videoId = extractYouTubeId(url);
+            if (!title || !videoId) { showToast("Enter a title and a valid YouTube link", 'error'); return; }
+            if (!songPlaylists[lang]) songPlaylists[lang] = [];
+            songPlaylists[lang].push({ id: uid(), title, videoId });
+            localStorage.setItem('moramaths_songplaylists', JSON.stringify(songPlaylists));
+            cloudPush();
+            titleEl.value = ''; urlEl.value = '';
+            renderAdminSongPlaylists();
+            showToast("Song added", 'success');
+        }
+
+        function deleteSongFromPlaylist(lang, songId) {
+            songPlaylists[lang] = (songPlaylists[lang] || []).filter(s => s.id !== songId);
+            localStorage.setItem('moramaths_songplaylists', JSON.stringify(songPlaylists));
+            cloudPush();
+            renderAdminSongPlaylists();
         }
 
         /* Small top-of-screen control: true pause/resume (freezes the whole audio
@@ -607,8 +884,8 @@
                     <i class="fa-solid fa-square-root-variable"></i>
                 </div>
                 <div class="min-w-0">
-                    <p class="text-xs font-black text-white truncate">MoraMaths</p>
-                    <p class="text-[9px] font-bold text-slate-500 tracking-wider">v2.0.0</p>
+                    <p class="text-xs font-black text-white truncate">MathLab</p>
+                    <p class="text-[9px] font-bold text-slate-500 tracking-wider" id="sidebar-version-tag">v2.0.0</p>
                 </div>
             </div>
             <button onclick="closeSidebar()" title="Collapse Sidebar" class="w-7 h-7 rounded-lg bg-slate-900 text-slate-400 hover:text-white flex items-center justify-center text-xs cursor-pointer"><i class="fa-solid fa-xmark"></i></button>
@@ -622,6 +899,8 @@
                 <i class="fa-solid fa-brain w-4 text-center text-purple-400"></i> <span id="txt-sidebar-focus">Focus Mode</span>
                 <span id="sidebar-focus-live-dot" class="hidden w-1.5 h-1.5 rounded-full bg-emerald-400 ml-auto animate-pulse"></span>
             </div>
+            <div class="sidebar-link" id="sidebar-link-pastpapers" onclick="sidebarAction('pastpapers')"><i class="fa-solid fa-file-lines w-4 text-center text-sky-400"></i> <span id="txt-sidebar-pastpapers">Past Papers</span></div>
+            <div class="sidebar-link" id="sidebar-link-contact" onclick="sidebarAction('contact')"><i class="fa-solid fa-headset w-4 text-center text-amber-400"></i> <span id="txt-sidebar-contact">Contact Us</span></div>
 
             <p class="sidebar-section-label mt-3" id="txt-sidebar-account">Account</p>
             <div class="sidebar-link" onclick="openProfileModal()"><i class="fa-regular fa-user w-4 text-center text-indigo-300"></i> <span id="txt-sidebar-profile">My Profile</span></div>
@@ -641,13 +920,18 @@
             <div id="nav-hamburger-wrap" class="hidden">
                 <button onclick="toggleSidebar()" class="bg-slate-900/80 hover:bg-slate-800 text-slate-200 border border-slate-800 w-9 h-9 rounded-xl transition cursor-pointer flex items-center justify-center shadow-md" title="Toggle Menu"><i class="fa-solid fa-bars"></i></button>
             </div>
-            <div class="bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-black px-3.5 py-2 rounded-2xl shadow-lg border border-indigo-400/30 flex items-center gap-2 text-xs sm:text-sm">
-                <i class="fa-solid fa-square-root-variable text-yellow-300"></i> MoraMaths Mega Edition
-                <span class="text-[9px] font-bold bg-black/25 px-1.5 py-0.5 rounded-md tracking-wider">v2.0.0</span>
+            <div class="glow-border shine-btn bg-gradient-to-r from-indigo-600 via-purple-600 to-fuchsia-600 text-white font-black px-3.5 py-2 rounded-2xl border border-indigo-400/40 flex items-center gap-2.5 leading-tight text-xs sm:text-sm">
+                <div class="w-7 h-7 rounded-xl bg-white/15 border border-white/20 flex items-center justify-center shrink-0 shadow-inner">
+                    <i class="fa-solid fa-square-root-variable text-yellow-300 text-sm animate-pulse"></i>
+                </div>
+                <div class="flex flex-col leading-tight relative z-10">
+                    <span class="flex items-center gap-2">
+                        MathLab By Sithum Munasinghe
+                        <span class="text-[9px] font-bold bg-black/25 px-1.5 py-0.5 rounded-md tracking-wider" id="nav-version-tag">v2.0.0</span>
+                    </span>
+                    <span class="text-[8px] sm:text-[9px] font-medium text-indigo-100/80 tracking-wide pl-0.5">Undergraduate, University of Moratuwa</span>
+                </div>
             </div>
-            <span class="text-[11px] font-medium text-slate-300 hidden lg:inline-block bg-slate-900/80 px-4 py-1.5 rounded-full border border-slate-800 shadow-inner whitespace-nowrap">
-                Sithum Munasinghe | University of Moratuwa Undergraduate
-            </span>
         </div>
         <div class="flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-end">
             <button onclick="toggleLanguage()" class="bg-slate-900/80 hover:bg-slate-800 text-slate-200 border border-slate-800 text-xs font-bold px-3.5 py-2 rounded-xl transition cursor-pointer flex items-center gap-2 shadow-md">
@@ -688,7 +972,7 @@
                 <div id="auth-hero-visual" class="w-full max-w-xs mx-auto lg:mx-0"></div>
                 <div class="space-y-3 mt-2">
                     <h2 id="hero-headline" class="text-2xl xl:text-3xl font-black text-white leading-tight">O/L ගණිතය සති 16කින්<br>සම්පූර්ණයෙන් ආවරණය කරමු</h2>
-                    <p id="hero-subheadline" class="text-sm text-slate-400 leading-relaxed">Live Zoom classes, weekly quizzes, leaderboard, සහ සම්පූර්ණ 16 සති පුනරීක්ෂණ සැලැස්මක් — MoraMaths සමගින්.</p>
+                    <p id="hero-subheadline" class="text-sm text-slate-400 leading-relaxed">Live Zoom classes, weekly quizzes, leaderboard, සහ සම්පූර්ණ 16 සති පුනරීක්ෂණ සැලැස්මක් — MathLab සමගින්.</p>
                     <div class="flex flex-wrap justify-center lg:justify-start gap-2 pt-2">
                         <span class="bg-slate-900/80 border border-slate-800 text-[11px] font-bold text-indigo-300 px-3 py-1.5 rounded-full shadow-md"><i class="fa-solid fa-video mr-1.5"></i>Live Classes</span>
                         <span class="bg-slate-900/80 border border-slate-800 text-[11px] font-bold text-emerald-300 px-3 py-1.5 rounded-full shadow-md"><i class="fa-solid fa-layer-group mr-1.5"></i>Weeks 16ක් සම්පූර්ණයි</span>
@@ -710,7 +994,7 @@
                     <i class="fa-solid fa-graduation-cap"></i>
                 </div>
                 <h1 id="txt-welcome" class="text-2xl sm:text-3xl font-black shimmer-text tracking-tight break-words">ආයුබෝවන්!</h1>
-                <p id="txt-portal-sub" class="text-xs sm:text-sm text-slate-400 font-medium leading-relaxed">MoraMaths Mega O/L Speed Revision Portal වෙත පිවිසෙන්න</p>
+                <p id="txt-portal-sub" class="text-xs sm:text-sm text-slate-400 font-medium leading-relaxed">MathLab Mega O/L Speed Revision Portal වෙත පිවිසෙන්න</p>
             </div>
 
             <!-- TABS -->
@@ -795,13 +1079,25 @@
                         <i class="fa-regular fa-clock"></i>
                     </div>
                 </div>
-                <button onclick="toggleScheduleView()" class="lift-card shine-btn text-left bg-gradient-to-br from-indigo-950 to-blue-950 border border-indigo-500/30 p-5 rounded-3xl shadow-xl flex items-center justify-between gap-4 cursor-pointer transition">
-                    <div class="min-w-0">
-                        <p class="text-[10px] font-bold text-indigo-300 uppercase tracking-wider mb-1" id="txt-schedule-card-label">Speed Revision 2026</p>
-                        <p class="text-sm sm:text-base font-black text-white" id="txt-schedule-card-sub">16 Week Mega Schedule</p>
+                <button onclick="toggleScheduleView()" class="lift-card shine-btn glow-border text-left relative overflow-hidden bg-gradient-to-br from-indigo-600 via-purple-700 to-fuchsia-800 border border-indigo-400/60 p-5 rounded-3xl shadow-2xl shadow-purple-900/50 ring-1 ring-white/10 flex items-center justify-between gap-4 cursor-pointer transition hover:scale-[1.02]">
+                    <span class="absolute -top-8 -right-8 w-28 h-28 bg-white/10 rounded-full blur-2xl"></span>
+                    <span class="absolute -bottom-10 -left-10 w-32 h-32 bg-fuchsia-400/10 rounded-full blur-2xl"></span>
+                    <span class="absolute top-2 right-3 text-[8px] font-black tracking-widest bg-white/15 text-yellow-200 px-2 py-0.5 rounded-full uppercase">Featured</span>
+                    <div class="min-w-0 relative z-10">
+                        <p class="text-[10px] font-bold text-indigo-100 uppercase tracking-wider mb-1" id="txt-schedule-card-label">Speed Revision 2026</p>
+                        <p class="text-sm sm:text-base font-black text-white drop-shadow" id="txt-schedule-card-sub">16 Week Mega Schedule</p>
                     </div>
-                    <div class="w-12 h-12 rounded-2xl bg-indigo-600/25 border border-indigo-500/40 text-indigo-300 flex items-center justify-center text-lg shrink-0">
-                        <i class="fa-solid fa-calendar-days"></i>
+                    <div class="w-14 h-14 rounded-2xl bg-white/15 border border-white/30 flex items-center justify-center shrink-0 relative z-10 shadow-inner overflow-hidden">
+                        <svg viewBox="0 0 48 48" class="w-9 h-9" fill="none">
+                            <rect x="6" y="10" width="36" height="30" rx="4" fill="#fde68a" fill-opacity="0.25" stroke="#fde047" stroke-width="2"/>
+                            <path d="M6 18h36" stroke="#fde047" stroke-width="2"/>
+                            <path d="M14 6v8M34 6v8" stroke="#fde047" stroke-width="2" stroke-linecap="round"/>
+                            <rect x="12" y="23" width="6" height="6" rx="1" fill="#fde047"/>
+                            <rect x="21" y="23" width="6" height="6" rx="1" fill="#ffffff" fill-opacity="0.6"/>
+                            <rect x="30" y="23" width="6" height="6" rx="1" fill="#ffffff" fill-opacity="0.6"/>
+                            <rect x="12" y="31" width="6" height="6" rx="1" fill="#ffffff" fill-opacity="0.6"/>
+                            <rect x="21" y="31" width="6" height="6" rx="1" fill="#fde047"/>
+                        </svg>
                     </div>
                 </button>
                 <button onclick="openFocusMode()" class="lift-card shine-btn text-left bg-gradient-to-br from-indigo-950 to-purple-950 border border-indigo-500/30 p-5 rounded-3xl shadow-xl flex items-center justify-between gap-4 cursor-pointer transition">
@@ -891,7 +1187,7 @@
         <div id="game-section" class="hidden w-full max-w-6xl space-y-6">
             <div class="bg-[#161224]/90 backdrop-blur-2xl border border-slate-800/80 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5">
                 <div class="flex items-center justify-between border-b border-slate-800 pb-4 gap-3">
-                    <h2 class="text-lg font-black text-white flex items-center gap-2"><i class="fa-solid fa-gamepad text-emerald-400"></i> <span id="game-title">O/L Maths Level Game — 16 Levels</span></h2>
+                    <h2 class="text-lg font-black text-white flex items-center gap-2"><i class="fa-solid fa-gamepad text-emerald-400"></i> <span id="game-title">O/L Maths Level Game — 17 Levels</span></h2>
                     <button onclick="toggleGameView()" class="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer transition"><i class="fa-solid fa-arrow-left mr-1"></i> <span id="game-back">Back</span></button>
                 </div>
                 <p id="game-sub" class="text-xs text-slate-400 -mt-2">සිංහල මාධ්‍යයෙන් O/L ගණිත විෂය නිර්දේශයට අනුව සකසන ලද මට්ටම් 16ක ක්‍රීඩාවකි. එක් එක් මට්ටම සමත් වී ඊළඟ මට්ටම අගුළු හරින්න!</p>
@@ -932,12 +1228,55 @@
             </div>
         </div>
 
+        <!-- PAST PAPERS -->
+        <div id="pastpapers-section" class="hidden w-full max-w-4xl space-y-6">
+            <div class="bg-[#161224]/90 backdrop-blur-2xl border border-slate-800/80 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-4 gap-3">
+                    <h2 class="text-lg font-black text-white flex items-center gap-2"><i class="fa-solid fa-file-lines text-sky-400"></i> <span id="txt-pastpapers-title">Past Papers</span></h2>
+                    <button onclick="togglePastPapersView()" class="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer transition"><i class="fa-solid fa-arrow-left mr-1"></i> Back</button>
+                </div>
+                <div id="pastpapers-list" class="space-y-4"></div>
+            </div>
+        </div>
+
+        <!-- CONTACT US -->
+        <div id="contact-section" class="hidden w-full max-w-2xl space-y-6">
+            <div class="bg-[#161224]/90 backdrop-blur-2xl border border-slate-800/80 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-4 gap-3">
+                    <h2 class="text-lg font-black text-white flex items-center gap-2"><i class="fa-solid fa-headset text-amber-400"></i> <span id="txt-contact-title">Contact Us</span></h2>
+                    <button onclick="toggleContactView()" class="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer transition"><i class="fa-solid fa-arrow-left mr-1"></i> Back</button>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <a id="contact-whatsapp-link" href="#" target="_blank" class="hidden bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-300 rounded-2xl px-4 py-4 flex items-center gap-3 transition">
+                        <i class="fa-brands fa-whatsapp text-2xl"></i>
+                        <div class="text-left"><p class="text-xs font-black">WhatsApp</p><p class="text-[10px] opacity-70">Chat with us directly</p></div>
+                    </a>
+                    <p id="contact-whatsapp-empty" class="hidden bg-[#0f0c1a] border border-dashed border-slate-700 text-slate-500 rounded-2xl px-4 py-4 text-[11px] flex items-center">WhatsApp not set up yet.</p>
+                    <a id="contact-telegram-link" href="#" target="_blank" class="hidden bg-sky-600/15 hover:bg-sky-600/25 border border-sky-500/30 text-sky-300 rounded-2xl px-4 py-4 flex items-center gap-3 transition">
+                        <i class="fa-brands fa-telegram text-2xl"></i>
+                        <div class="text-left"><p class="text-xs font-black">Telegram</p><p class="text-[10px] opacity-70">Join our channel/chat</p></div>
+                    </a>
+                    <p id="contact-telegram-empty" class="hidden bg-[#0f0c1a] border border-dashed border-slate-700 text-slate-500 rounded-2xl px-4 py-4 text-[11px] flex items-center">Telegram not set up yet.</p>
+                </div>
+
+                <div id="my-message-panel" class="bg-[#0f0c1a] border border-slate-800 rounded-2xl p-4 space-y-3">
+                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-comments"></i> Message Admin</h3>
+                    <div id="my-message-thread" class="space-y-2 max-h-64 overflow-y-auto pr-1"></div>
+                    <div class="flex gap-2">
+                        <input type="text" id="my-message-input" placeholder="Type a message…" class="flex-1 bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500" onkeypress="if(event.key==='Enter') sendMessageToAdmin();">
+                        <button onclick="sendMessageToAdmin()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-4 rounded-xl transition cursor-pointer"><i class="fa-solid fa-paper-plane"></i></button>
+                    </div>
+                    <p class="text-[9px] text-slate-600">Only you and the admin can see this conversation.</p>
+                </div>
+            </div>
+        </div>
+
         <!-- ADMIN PANEL -->
         <div id="admin-panel" class="hidden w-full max-w-6xl space-y-6">
             <div class="bg-[#161224]/90 backdrop-blur-2xl border border-slate-800/80 rounded-3xl p-6 sm:p-8 text-white shadow-2xl space-y-6">
                 <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-slate-800 pb-4 gap-4">
                     <div>
-                        <h2 class="text-xl font-black flex items-center gap-2"><i class="fa-solid fa-shield-halved text-indigo-400"></i> MoraMaths Admin Control Center</h2>
+                        <h2 class="text-xl font-black flex items-center gap-2"><i class="fa-solid fa-shield-halved text-indigo-400"></i> MathLab Admin Control Center</h2>
                         <p class="text-xs text-slate-400 mt-1">සති 16 ක සම්පූර්ණ ප්ලෑන් එක, පාඩම්, PDFs සහ Zoom විස්තර පාලනය කිරීම</p>
                     </div>
                     <span id="admin-role-badge" class="bg-indigo-600/20 text-indigo-400 text-xs font-extrabold px-3 py-1.5 rounded-xl border border-indigo-500/30 whitespace-nowrap">Admin</span>
@@ -1025,23 +1364,111 @@
                         <!-- GOALS & ACHIEVEMENTS SETTINGS -->
                         <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
                             <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-bullseye"></i> Goals &amp; Achievements කළමනාකරණය</h3>
-                            <p class="text-[10px] text-slate-500 leading-relaxed">සිසුන්ගේ dashboard එකේ පෙන්නන "Revision Completed" % එකයි "Past Papers Solved" ගණනයි මෙතනින් update කරන්න. සියලුම සිසුන්ටම එකම අගයන් පෙන්වයි.</p>
-                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <p class="text-[10px] text-slate-500 leading-relaxed">සිසුන්ගේ dashboard එකේ "Revision Completed" % එකයි "Papers" ගණනයි කුමන දත්තයකින් පෙන්වන්නද කියා පමණක් තෝරන්න — අගයන් එක් එක් සිසුවා සැබවින්ම කර ඇති දේ අනුව ස්වයංක්‍රීයව ගණනය වේ.</p>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
-                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Revision %</label>
-                                    <input type="number" id="admin-goals-revision" min="0" max="100" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition">
+                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">"Revision %" කුමකින් ගණනය කරන්නද?</label>
+                                    <select id="admin-goals-revision-metric" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition">
+                                        <option value="quizzes">Quizzes Completed (attempted / total lessons)</option>
+                                        <option value="weeks">Weeks Unlocked (unlocked / total weeks)</option>
+                                    </select>
                                 </div>
                                 <div>
-                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Papers Done</label>
-                                    <input type="number" id="admin-goals-papers-done" min="0" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition">
-                                </div>
-                                <div>
-                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Papers Total</label>
-                                    <input type="number" id="admin-goals-papers-total" min="1" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition">
+                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">"Papers" කුමකින් ගණනය කරන්නද?</label>
+                                    <select id="admin-goals-papers-metric" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition">
+                                        <option value="quizzes">Quizzes Attempted (of all lessons)</option>
+                                        <option value="pastpapers">Past Papers Marked as Solved</option>
+                                    </select>
                                 </div>
                             </div>
                             <button onclick="saveGoalsData()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg">Goals සුරකින්න (Save)</button>
                         </div>
+                    </div>
+                </div>
+
+                <!-- PAST PAPERS MANAGER -->
+                <div class="border-t border-slate-800 pt-6 space-y-4">
+                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-file-lines"></i> Past Papers කළමනාකරණය</h3>
+                    <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
+                        <p class="text-[10px] text-slate-500 leading-relaxed">වසරක් එකතු කරලා, ඒ යටතට papers දාන්න. "Published" කරන තුරු සිසුන්ට "Coming Soon" විදිහට පෙන්වයි — වසර අනුව වෙන වෙනම publish කරන්න පුළුවන්.</p>
+                        <div class="flex gap-2">
+                            <input type="number" id="admin-new-paper-year" placeholder="e.g. 2026" min="2000" max="2100" class="w-32 bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition">
+                            <button onclick="addPaperYear()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-4 rounded-xl transition cursor-pointer shadow-lg"><i class="fa-solid fa-plus mr-1"></i> Add Year</button>
+                        </div>
+                        <div id="admin-pastpapers-list" class="space-y-3"></div>
+                    </div>
+                </div>
+
+                <!-- SONG PLAYLISTS MANAGER (Focus Mode — real songs via official YouTube embed) -->
+                <div class="border-t border-slate-800 pt-6 space-y-4">
+                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-brands fa-youtube"></i> Focus Mode Song Playlists</h3>
+                    <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
+                        <p class="text-[10px] text-slate-500 leading-relaxed">English / Sinhala / Hindi song එකක් වචනයෙන් නමක් සහ YouTube link එකක් දාන්න — Focus Mode එකේ සිසුන්ට official YouTube player එකෙන්ම play කරන්න පුළුවන් වෙනවා. (කැමති ගණනක් songs දාන්න පුළුවන්, 3ක් යෝජනා කළත්.)</p>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div class="space-y-2">
+                                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">English</p>
+                                <div class="flex flex-col gap-2">
+                                    <input type="text" id="admin-song-title-english" placeholder="Song title" class="w-full bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
+                                    <input type="text" id="admin-song-url-english" placeholder="YouTube link" class="w-full bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
+                                    <button onclick="addSongToPlaylist('english')" class="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold py-2 rounded-lg transition cursor-pointer">Add Song</button>
+                                </div>
+                                <div id="admin-songs-english" class="space-y-1.5 pt-1"></div>
+                            </div>
+                            <div class="space-y-2">
+                                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sinhala</p>
+                                <div class="flex flex-col gap-2">
+                                    <input type="text" id="admin-song-title-sinhala" placeholder="Song title" class="w-full bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
+                                    <input type="text" id="admin-song-url-sinhala" placeholder="YouTube link" class="w-full bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
+                                    <button onclick="addSongToPlaylist('sinhala')" class="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold py-2 rounded-lg transition cursor-pointer">Add Song</button>
+                                </div>
+                                <div id="admin-songs-sinhala" class="space-y-1.5 pt-1"></div>
+                            </div>
+                            <div class="space-y-2">
+                                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Hindi</p>
+                                <div class="flex flex-col gap-2">
+                                    <input type="text" id="admin-song-title-hindi" placeholder="Song title" class="w-full bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
+                                    <input type="text" id="admin-song-url-hindi" placeholder="YouTube link" class="w-full bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
+                                    <button onclick="addSongToPlaylist('hindi')" class="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold py-2 rounded-lg transition cursor-pointer">Add Song</button>
+                                </div>
+                                <div id="admin-songs-hindi" class="space-y-1.5 pt-1"></div>
+                            </div>
+                        </div>
+                        <p class="text-[9px] text-slate-600">Please only link songs you have the right to share — this embeds YouTube's official player, it doesn't store any audio on this site.</p>
+                    </div>
+                </div>
+
+                <!-- STUDENT MESSAGES INBOX -->
+                <div class="border-t border-slate-800 pt-6 space-y-4">
+                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-comments"></i> Student Messages</h3>
+                    <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl shadow-inner grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div id="admin-messages-inbox" class="space-y-2 max-h-80 overflow-y-auto pr-1"></div>
+                        <div id="admin-message-thread-wrap" class="hidden flex flex-col">
+                            <p class="text-xs font-bold text-white mb-2" id="admin-message-thread-name"></p>
+                            <div id="admin-message-thread" class="space-y-2 flex-1 max-h-56 overflow-y-auto pr-1 mb-2"></div>
+                            <div class="flex gap-2">
+                                <input type="text" id="admin-message-reply-input" placeholder="Reply…" class="flex-1 bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" onkeypress="if(event.key==='Enter') sendAdminReply();">
+                                <button onclick="sendAdminReply()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-4 rounded-xl transition cursor-pointer"><i class="fa-solid fa-paper-plane"></i></button>
+                            </div>
+                            <p class="text-[9px] text-slate-600 mt-1">Only this student can see your reply.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CONTACT US SETTINGS (Master Admin only) -->
+                <div class="master-admin-only hidden border-t border-slate-800 pt-6 space-y-4">
+                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-headset"></i> Contact Us Links <span class="text-[9px] bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-md">Master Admin Only</span></h3>
+                    <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">WhatsApp Link (wa.me/... or full URL)</label>
+                                <input type="text" id="admin-contact-whatsapp" placeholder="https://wa.me/94771234567" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition">
+                            </div>
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Telegram Link</label>
+                                <input type="text" id="admin-contact-telegram" placeholder="https://t.me/yourchannel" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition">
+                            </div>
+                        </div>
+                        <button onclick="saveContactData()" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-6 py-3 rounded-xl transition cursor-pointer shadow-lg"><i class="fa-solid fa-floppy-disk mr-1"></i> Save Contact Links</button>
                     </div>
                 </div>
 
@@ -1161,7 +1588,7 @@
                 </div>
                 <div class="flex justify-between items-center">
                     <span class="text-[10px] font-bold text-slate-400 uppercase whitespace-nowrap"><i class="fa-solid fa-user-graduate mr-1.5 text-emerald-400"></i> Role</span>
-                    <span class="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md whitespace-nowrap">Student</span>
+                    <span id="modal-profile-role" class="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md whitespace-nowrap">Student</span>
                 </div>
             </div>
         </div>
@@ -1348,12 +1775,52 @@
                         <i class="fa-solid fa-mug-hot"></i> Cafe Hum
                     </button>
                 </div>
+
+                <p class="text-[9px] font-bold text-indigo-400 uppercase tracking-wider pt-1">Ambient Instrumental</p>
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                    <button onclick="playFocusTrack('piano')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="piano">
+                        <i class="fa-solid fa-music"></i> Soft Piano
+                    </button>
+                    <button onclick="playFocusTrack('strings')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="strings">
+                        <i class="fa-solid fa-guitar"></i> Warm Strings
+                    </button>
+                    <button onclick="playFocusTrack('guitar')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="guitar">
+                        <i class="fa-solid fa-record-vinyl"></i> Acoustic Pluck
+                    </button>
+                </div>
+
+                <p class="text-[9px] font-bold text-indigo-400 uppercase tracking-wider pt-1">English Study Playlist</p>
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                    <button onclick="playFocusTrack('lofi')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="lofi">
+                        <i class="fa-solid fa-headphones"></i> Lofi Chill Beats
+                    </button>
+                    <button onclick="playFocusTrack('jazz')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="jazz">
+                        <i class="fa-solid fa-martini-glass"></i> Coffee Shop Jazz
+                    </button>
+                    <button onclick="playFocusTrack('synthwave')" class="focus-track-btn bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/50 text-slate-300 hover:text-white text-[10px] font-bold py-3 rounded-xl transition cursor-pointer flex flex-col items-center gap-1.5" data-track="synthwave">
+                        <i class="fa-solid fa-star"></i> Night Synth Focus
+                    </button>
+                </div>
                 <div class="flex items-center gap-3">
                     <i class="fa-solid fa-volume-low text-slate-500 text-xs"></i>
                     <input type="range" id="focus-volume-slider" min="0" max="100" value="45" class="w-full accent-indigo-500 cursor-pointer" oninput="setFocusVolume(this.value)">
                     <i class="fa-solid fa-volume-high text-slate-500 text-xs"></i>
                 </div>
                 <p class="text-[9px] text-slate-600 leading-relaxed"><i class="fa-solid fa-circle-info mr-1"></i> Generated live in your browser — no audio files to download, and it loops for as long as you like.</p>
+
+                <div class="border-t border-slate-800 pt-4 space-y-3">
+                    <p class="text-[9px] font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-brands fa-youtube"></i> Song Playlists</p>
+                    <div class="flex gap-2">
+                        <button onclick="switchSongPlaylistTab('english')" id="song-tab-english" class="song-tab-btn flex-1 bg-indigo-600/30 border border-indigo-500/60 text-white text-[10px] font-bold py-2 rounded-xl transition cursor-pointer">English</button>
+                        <button onclick="switchSongPlaylistTab('sinhala')" id="song-tab-sinhala" class="song-tab-btn flex-1 bg-[#0f0c1a] border border-slate-800 text-slate-300 text-[10px] font-bold py-2 rounded-xl transition cursor-pointer">සිංහල</button>
+                        <button onclick="switchSongPlaylistTab('hindi')" id="song-tab-hindi" class="song-tab-btn flex-1 bg-[#0f0c1a] border border-slate-800 text-slate-300 text-[10px] font-bold py-2 rounded-xl transition cursor-pointer">हिंदी</button>
+                    </div>
+                    <div id="song-playlist-list" class="space-y-1.5"></div>
+                    <div id="song-player-wrap" class="hidden aspect-video w-full rounded-2xl overflow-hidden border border-slate-800 shadow-inner">
+                        <iframe id="song-player-iframe" class="w-full h-full" src="" title="Song player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                    </div>
+                    <p class="text-[9px] text-slate-600 leading-relaxed"><i class="fa-solid fa-circle-info mr-1"></i> Played through YouTube's own official player — these are links the admin has added, not files stored on this site.</p>
+                </div>
             </div>
         </div>
     </div>
@@ -1383,17 +1850,17 @@
 
     <!-- FOOTER -->
     <footer class="relative z-10 text-center py-5 text-xs text-slate-500 border-t border-slate-900 bg-[#0f0c1a]/50 px-4">
-        © 2026 MoraMaths Mega Edition by Sithum Munasinghe. All Rights Reserved. <span class="opacity-60">· v2.0.0</span>
+        © 2026 MathLab by Sithum Munasinghe. All Rights Reserved. <span class="opacity-60" id="footer-version-tag">· v2.0.0</span>
     </footer>
 
     </div> <!-- /#page-shell -->
 
-    <!-- FOCUS MUSIC TOP MINI-CONTROL (small play/pause mark, always reachable) -->
-    <div id="focus-top-indicator" class="hidden fixed top-3 left-1/2 -translate-x-1/2 z-[95] bg-[#161224]/95 backdrop-blur-xl border border-indigo-500/50 rounded-full shadow-2xl pl-1.5 pr-3 py-1.5 flex items-center gap-2 cursor-pointer" onclick="openFocusMode()">
+    <!-- FOCUS MUSIC MINI-CONTROL (small play/pause mark, always reachable, tucked on the right edge so it never overlaps the nav or other content) -->
+    <div id="focus-top-indicator" class="hidden fixed top-1/2 right-0 -translate-y-1/2 z-[95] bg-[#161224]/90 backdrop-blur-xl border border-indigo-500/50 border-r-0 rounded-l-full shadow-2xl pl-3 pr-1.5 py-1.5 flex items-center gap-2 cursor-pointer" onclick="openFocusMode()">
+        <span class="text-[10px] font-bold text-indigo-200 whitespace-nowrap">🎧 <span id="focus-top-track-name">Focus Music</span></span>
         <button onclick="event.stopPropagation(); toggleFocusPlayPause();" class="w-7 h-7 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center text-[10px] cursor-pointer transition shrink-0" title="Play/Pause">
             <i class="fa-solid fa-pause" id="focus-top-icon"></i>
         </button>
-        <span class="text-[10px] font-bold text-indigo-200 whitespace-nowrap">🎧 <span id="focus-top-track-name">Focus Music</span></span>
     </div>
 
     <!-- FOCUS MODE MINI PLAYER (persists across the app while ambient audio is playing) -->
@@ -1481,11 +1948,28 @@
             if (data.siteAssets) { siteAssets = data.siteAssets; localStorage.setItem('moramaths_site_assets', JSON.stringify(siteAssets)); }
             if (data.progressGraphConfig) { progressGraphConfig = data.progressGraphConfig; localStorage.setItem('moramaths_progress_config', JSON.stringify(progressGraphConfig)); }
             if (data.goalsData) { goalsData = data.goalsData; localStorage.setItem('moramaths_goals_data', JSON.stringify(goalsData)); }
+            if (data.pastPapersData) { pastPapersData = data.pastPapersData; localStorage.setItem('moramaths_pastpapers', JSON.stringify(pastPapersData)); }
+            if (data.contactData) { contactData = data.contactData; localStorage.setItem('moramaths_contact', JSON.stringify(contactData)); }
+            if (data.studentMessages) { studentMessages = data.studentMessages; localStorage.setItem('moramaths_messages', JSON.stringify(studentMessages)); }
+            if (data.songPlaylists) { songPlaylists = data.songPlaylists; localStorage.setItem('moramaths_songplaylists', JSON.stringify(songPlaylists)); }
             // Keep the logged-in user's own record (quiz scores, streak, game progress) fresh too,
             // in case it changed from another device.
             if (typeof currentUser !== 'undefined' && currentUser) {
                 const freshMe = users.find(u => u.username === currentUser.username);
-                if (freshMe) { currentUser = freshMe; localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser)); }
+                if (freshMe) {
+                    if (freshMe.banned && !isAdminUser(freshMe)) {
+                        suppressCloudPush = false;
+                        currentUser = null;
+                        localStorage.removeItem('moramaths_current_user');
+                        if (appInitialized) {
+                            initApp();
+                            showToast(currentLang === 'si' ? "ඔබගේ ගිණුම අත්හිටුවා ඇත." : "Your account has been suspended.", 'error');
+                        }
+                        return;
+                    }
+                    currentUser = freshMe;
+                    localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
+                }
             }
             suppressCloudPush = false;
             if (appInitialized) refreshUIAfterCloudSync();
@@ -1495,6 +1979,7 @@
             if (!firebaseReady || suppressCloudPush || !cloudDocRef) return;
             cloudDocRef.set({
                 users, weeksData, zoomData, notifications, siteAssets, progressGraphConfig, goalsData,
+                pastPapersData, contactData, studentMessages, songPlaylists,
                 updatedAt: Date.now()
             }, { merge: true }).catch(err => console.warn('Cloud sync push failed:', err));
         }
@@ -1509,10 +1994,18 @@
                     if (typeof renderAdminUsersList === 'function') renderAdminUsersList();
                     if (typeof renderAdminNotifManageList === 'function') renderAdminNotifManageList();
                     if (typeof populateAdminGraphScopeSelect === 'function') populateAdminGraphScopeSelect();
+                    if (typeof renderAdminPastPapers === 'function') renderAdminPastPapers();
+                    if (typeof renderAdminSongPlaylists === 'function') renderAdminSongPlaylists();
+                    if (typeof renderAdminMessagesInbox === 'function') renderAdminMessagesInbox();
+                    if (viewedMessageThreadUsername && typeof openAdminMessageThread === 'function') openAdminMessageThread(viewedMessageThreadUsername);
                 } else {
                     if (typeof setupStudentDashboard === 'function') setupStudentDashboard();
                     if (typeof renderChart === 'function') renderChart();
                     if (typeof renderGoals === 'function') renderGoals();
+                    const papersSec = document.getElementById('pastpapers-section');
+                    if (papersSec && !papersSec.classList.contains('hidden') && typeof renderPastPapersView === 'function') renderPastPapersView();
+                    const contactSec = document.getElementById('contact-section');
+                    if (contactSec && !contactSec.classList.contains('hidden') && typeof renderMessageThread === 'function') renderMessageThread();
                 }
                 if (typeof renderNotifBell === 'function') renderNotifBell();
             }
@@ -1523,6 +2016,12 @@
            off to initApp(). Falls back to whatever is in localStorage if offline/slow. */
         function bootstrapApp() {
             startLiveClock();
+            const navTag = document.getElementById('nav-version-tag');
+            if (navTag) navTag.textContent = 'v' + APP_VERSION;
+            const sidebarTag = document.getElementById('sidebar-version-tag');
+            if (sidebarTag) sidebarTag.textContent = 'v' + APP_VERSION;
+            const footerTag = document.getElementById('footer-version-tag');
+            if (footerTag) footerTag.textContent = '· v' + APP_VERSION;
             initFirebaseSync();
             if (!firebaseReady || !cloudDocRef) { initApp(); return; }
 
@@ -1556,7 +2055,7 @@
                 email: toEmail,
                 to_name: toName,
                 name: toName,
-                from_name: "MoraMaths Mega Edition",
+                from_name: "MathLab By Sithum Munasinghe",
                 passcode: otpCode,
                 otp: otpCode,
                 otp_code: otpCode,
@@ -1742,6 +2241,18 @@
                 { q: "2,4,6,8,10 සංඛ්‍යා වල මධ්‍යනය (mean) කීයද?", options: ["5", "6", "7", "8"], correct: 1 },
                 { q: "3,5,7,9,11 සංඛ්‍යා වල මධ්‍යස්ථය (median) කීයද?", options: ["5", "7", "9", "6"], correct: 1 },
                 { q: "2,3,3,4,5,3 දත්ත කුලකයේ බහුලකය (mode) කුමක්ද?", options: ["2", "3", "4", "5"], correct: 1 }
+            ]},
+            { titleSi: "සංඛ්‍යා රටා අභියෝගය (IQ)", titleEn: "Number Pattern IQ Challenge", icon: "fa-brain", type: "numeric", questions: [
+                { q: "3, 7, 11, 15, ?", ans: 19, hint: "සමාන්තර ශ්‍රේණියක් (+4 එකතු වේ)" },
+                { q: "2, 6, 18, 54, ?", ans: 162, hint: "ගුණෝත්තර ශ්‍රේණියක් (x3 ගුණ වේ)" },
+                { q: "1, 4, 9, 16, 25, ?", ans: 36, hint: "වර්ග සංඛ්‍යා රටාව (1², 2², 3²...)" },
+                { q: "1, 3, 6, 10, 15, ?", ans: 21, hint: "ත්‍රිකෝණ සංඛ්‍යා රටාව" },
+                { q: "0, 1, 1, 2, 3, 5, ?", ans: 8, hint: "ෆිබොනාචි රටාව (කලින් සංඛ්‍යා 2හි එකතුව)" },
+                { q: "2, 3, 5, 7, 11, 13, ?", ans: 17, hint: "ප්‍රථමක සංඛ්‍යා රටාව" },
+                { q: "1, 8, 27, 64, ?", ans: 125, hint: "ඝන සංඛ්‍යා රටාව (1³, 2³, 3³...)" },
+                { q: "100, 95, 85, 70, ?", ans: 50, hint: "වෙනස අනුක්‍රමයෙන් වැඩි වන රටාව (-5,-10,-15,-20)" },
+                { q: "2, 5, 10, 17, 26, ?", ans: 37, hint: "(n² + 1) රටාව" },
+                { q: "3, 5, 9, 17, 33, ?", ans: 65, hint: "(x2 - 1) රටාව" }
             ]}
         ];
 
@@ -1768,7 +2279,7 @@
                 langBtn: "English",
                 logout: "ඉවත් වන්න",
                 welcome: "ආයුබෝවන්!",
-                portalSub: "MoraMaths Mega O/L Speed Revision Portal වෙත පිවිසෙන්න",
+                portalSub: "MathLab Mega O/L Speed Revision Portal වෙත පිවිසෙන්න",
                 loginTab: "Login",
                 regTab: "Register",
                 lblLoginId: "Username හෝ Email",
@@ -1812,7 +2323,7 @@
                 leaderboardBack: "ආපසු",
                 leaderboardEmpty: "තවම කිසිවෙකු Quiz එකක් කර නැත — පළමු වන්න!",
                 gameBtn: "ක්‍රීඩාව",
-                gameTitle: "O/L ගණිත මට්ටම් ක්‍රීඩාව — මට්ටම් 16ක්",
+                gameTitle: "O/L ගණිත මට්ටම් ක්‍රීඩාව — මට්ටම් 17ක්",
                 gameSub: "සිංහල මාධ්‍යයෙන් O/L ගණිත විෂය නිර්දේශයට අනුව සකසන ලද මට්ටම් 16ක ක්‍රීඩාවකි. එක් එක් මට්ටම සමත් වී ඊළඟ මට්ටම අගුළු හරින්න!",
                 gameBack: "ආපසු",
                 notifTitle: "දැනුම්දීම්",
@@ -1822,7 +2333,7 @@
                 quizResultPrefix: "ඔබේ ලකුණ:",
                 quizClose: "වසන්න",
                 heroHeadline: "O/L ගණිතය සති 16කින්<br>සම්පූර්ණයෙන් ආවරණය කරමු",
-                heroSub: "Live Zoom classes, weekly quizzes, leaderboard, සහ සම්පූර්ණ 16 සති පුනරීක්ෂණ සැලැස්මක් — MoraMaths සමගින්.",
+                heroSub: "Live Zoom classes, weekly quizzes, leaderboard, සහ සම්පූර්ණ 16 සති පුනරීක්ෂණ සැලැස්මක් — MathLab සමගින්.",
                 heroChip1: "Live Classes",
                 heroChip2: "Weeks 16ක් සම්පූර්ණයි",
                 heroChip3: "Leaderboard &amp; Quizzes"
@@ -1832,7 +2343,7 @@
                 langBtn: "සිංහල",
                 logout: "Log Out",
                 welcome: "Welcome!",
-                portalSub: "Welcome to MoraMaths Mega O/L Speed Revision Portal",
+                portalSub: "Welcome to MathLab Mega O/L Speed Revision Portal",
                 loginTab: "Login",
                 regTab: "Register",
                 lblLoginId: "Username or Email",
@@ -1876,7 +2387,7 @@
                 leaderboardBack: "Back",
                 leaderboardEmpty: "No quiz attempts yet — be the first!",
                 gameBtn: "Level Game",
-                gameTitle: "O/L Maths Level Game — 16 Levels",
+                gameTitle: "O/L Maths Level Game — 17 Levels",
                 gameSub: "A 16-level game built to match the O/L Mathematics syllabus. Pass each level to unlock the next!",
                 gameBack: "Back",
                 notifTitle: "Notifications",
@@ -1886,7 +2397,7 @@
                 quizResultPrefix: "Your score:",
                 quizClose: "Close",
                 heroHeadline: "Master O/L Mathematics<br>in Just 16 Weeks",
-                heroSub: "Live Zoom classes, weekly quizzes, a leaderboard, and a complete 16-week revision plan — all in MoraMaths.",
+                heroSub: "Live Zoom classes, weekly quizzes, a leaderboard, and a complete 16-week revision plan — all in MathLab.",
                 heroChip1: "Live Classes",
                 heroChip2: "16 Weeks Complete",
                 heroChip3: "Leaderboard &amp; Quizzes"
@@ -1982,7 +2493,11 @@
            the app data. scope: 'all' shows every attempted quiz combined; a numeric
            string (e.g. "2") restricts the graph to quizzes belonging to that week index. */
         let progressGraphConfig = JSON.parse(localStorage.getItem('moramaths_progress_config')) || { scope: 'all' };
-        let goalsData = JSON.parse(localStorage.getItem('moramaths_goals_data')) || { revisionPercent: 40, papersDone: 8, papersTotal: 20 };
+        let goalsData = JSON.parse(localStorage.getItem('moramaths_goals_data')) || { revisionMetric: 'quizzes', papersMetric: 'quizzes' };
+        let pastPapersData = JSON.parse(localStorage.getItem('moramaths_pastpapers')) || [];
+        let contactData = JSON.parse(localStorage.getItem('moramaths_contact')) || { whatsapp: '', telegram: '' };
+        let studentMessages = JSON.parse(localStorage.getItem('moramaths_messages')) || {};
+        let songPlaylists = JSON.parse(localStorage.getItem('moramaths_songplaylists')) || { english: [], sinhala: [], hindi: [] };
 
         /* Custom-built SVG illustration used on the login screen when no admin image is set. */
         const defaultHeroIllustrationSVG = `
@@ -2085,6 +2600,10 @@
             document.getElementById('schedule-section-title').innerText = t.scheduleSectionTitle;
             document.getElementById('schedule-back').innerText = t.scheduleBack;
             document.getElementById('txt-sidebar-focus').innerText = t.sidebarFocus;
+            document.getElementById('txt-sidebar-pastpapers').innerText = currentLang === 'si' ? 'පසුගිය ප්‍රශ්න පත්‍ර' : 'Past Papers';
+            document.getElementById('txt-pastpapers-title').innerText = currentLang === 'si' ? 'පසුගිය ප්‍රශ්න පත්‍ර' : 'Past Papers';
+            document.getElementById('txt-sidebar-contact').innerText = currentLang === 'si' ? 'අප අමතන්න' : 'Contact Us';
+            document.getElementById('txt-contact-title').innerText = currentLang === 'si' ? 'අප අමතන්න' : 'Contact Us';
             document.getElementById('txt-sidebar-account').innerText = t.sidebarAccount;
             document.getElementById('txt-sidebar-profile').innerText = t.sidebarProfile;
             document.getElementById('txt-sidebar-logout').innerText = t.logout;
@@ -2134,7 +2653,7 @@
             ]
         }));
         let notifications = JSON.parse(localStorage.getItem('moramaths_notifications')) || [
-            { id: uid(), text: currentLang === 'si' ? "MoraMaths Mega Edition වෙත සාදරයෙන් පිළිගනිමු! 🎉" : "Welcome to MoraMaths Mega Edition! 🎉", date: Date.now() }
+            { id: uid(), text: currentLang === 'si' ? "MathLab වෙත සාදරයෙන් පිළිගනිමු! 🎉" : "Welcome to MathLab! 🎉", date: Date.now() }
         ];
 
         let tempRegData = null;
@@ -2156,7 +2675,17 @@
                 if (!u.gameProgress) u.gameProgress = { unlocked: 1, scores: {} };
                 if (!u.role) u.role = (u.username === 'admin') ? 'master_admin' : 'student';
                 if (!u.streak) u.streak = { count: 0, lastDate: '' };
+                if (!u.solvedPapers) u.solvedPapers = [];
+                if (u.banned === undefined) u.banned = false;
             });
+            if (!Array.isArray(pastPapersData)) pastPapersData = [];
+            if (!goalsData || typeof goalsData !== 'object') goalsData = { revisionMetric: 'quizzes', papersMetric: 'quizzes' };
+            if (!goalsData.revisionMetric) goalsData.revisionMetric = 'quizzes';
+            if (!goalsData.papersMetric) goalsData.papersMetric = 'quizzes';
+            if (!contactData || typeof contactData !== 'object') contactData = { whatsapp: '', telegram: '' };
+            if (!studentMessages || typeof studentMessages !== 'object') studentMessages = {};
+            if (!songPlaylists || typeof songPlaylists !== 'object') songPlaylists = { english: [], sinhala: [], hindi: [] };
+            ['english', 'sinhala', 'hindi'].forEach(k => { if (!Array.isArray(songPlaylists[k])) songPlaylists[k] = []; });
             if (currentUser && !currentUser.quizScores) currentUser.quizScores = {};
             if (currentUser && !currentUser.gameProgress) currentUser.gameProgress = { unlocked: 1, scores: {} };
             if (currentUser && !currentUser.role) currentUser.role = (currentUser.username === 'admin') ? 'master_admin' : 'student';
@@ -2173,6 +2702,8 @@
             document.getElementById('leaderboard-section').classList.add('hidden');
             document.getElementById('game-section').classList.add('hidden');
             document.getElementById('schedule-section').classList.add('hidden');
+            document.getElementById('pastpapers-section').classList.add('hidden');
+            document.getElementById('contact-section').classList.add('hidden');
             if (currentUser) {
                 document.getElementById('auth-screen-flex').classList.add('hidden');
                 document.getElementById('auth-container').classList.add('hidden');
@@ -2196,6 +2727,10 @@
                     renderAdminNotifManageList();
                     populateAdminGraphScopeSelect();
                     loadAdminGoalsForm();
+                    renderAdminPastPapers();
+                    loadAdminContactForm();
+                    renderAdminMessagesInbox();
+                    renderAdminSongPlaylists();
                     document.getElementById('admin-role-badge').innerText = isMasterAdmin(currentUser) ? 'Master Admin' : 'Admin';
                     document.querySelectorAll('.master-admin-only').forEach(el => el.classList.toggle('hidden', !isMasterAdmin(currentUser)));
                 } else {
@@ -2296,6 +2831,10 @@
             const found = users.find(u => (u.username.toLowerCase() === id || u.email.toLowerCase() === id) && u.password === pass);
             if (!found) {
                 showToast(currentLang === 'si' ? "වැරදි Username එකක් හෝ Password එකක්!" : "Invalid Username or Password!", 'error');
+                return;
+            }
+            if (found.banned) {
+                showToast(currentLang === 'si' ? "ඔබගේ ගිණුම අත්හිටුවා ඇත. Admin අමතන්න." : "Your account has been suspended. Please contact the admin.", 'error');
                 return;
             }
 
@@ -2413,40 +2952,65 @@
             renderGoals();
         }
 
-        /* ============ GOALS & ACHIEVEMENTS (admin-controlled) ============ */
+        /* ============ GOALS & ACHIEVEMENTS (admin selects the metric; values are auto-computed per student) ============ */
+        function countTotalLessons() {
+            return weeksData.reduce((sum, w) => sum + (w.lessons ? w.lessons.length : 0), 0);
+        }
+
+        function countPublishedPastPapers() {
+            return pastPapersData.filter(y => y.published).reduce((sum, y) => sum + (y.papers ? y.papers.length : 0), 0);
+        }
+
+        function computeGoalsForUser(user) {
+            if (!user) return { revisionPercent: 0, done: 0, total: 1 };
+            const stats = computeUserStats(user);
+            const totalLessons = Math.max(1, countTotalLessons());
+            let revisionPercent;
+            if (goalsData.revisionMetric === 'weeks') {
+                const totalWeeks = Math.max(1, weeksData.length);
+                const unlockedWeeks = weeksData.filter(w => !w.isLocked).length;
+                revisionPercent = Math.round((unlockedWeeks / totalWeeks) * 100);
+            } else {
+                revisionPercent = Math.round((stats.attempted / totalLessons) * 100);
+            }
+            let done, total;
+            if (goalsData.papersMetric === 'pastpapers') {
+                done = (user.solvedPapers || []).length;
+                total = Math.max(1, countPublishedPastPapers());
+            } else {
+                done = stats.attempted;
+                total = totalLessons;
+            }
+            return { revisionPercent: Math.max(0, Math.min(100, revisionPercent)), done: Math.max(0, done), total: Math.max(1, total) };
+        }
+
         function renderGoals() {
-            const rev = Math.max(0, Math.min(100, Number(goalsData.revisionPercent) || 0));
-            const done = Math.max(0, Number(goalsData.papersDone) || 0);
-            const total = Math.max(1, Number(goalsData.papersTotal) || 1);
-            const papersPct = Math.max(0, Math.min(100, (done / total) * 100));
+            const g = computeGoalsForUser(currentUser);
+            const papersPct = Math.max(0, Math.min(100, (g.done / g.total) * 100));
             const revBar = document.getElementById('goals-rev-bar');
             const revText = document.getElementById('goals-rev-percent-text');
             const papersBar = document.getElementById('goals-papers-bar');
             const papersText = document.getElementById('goals-papers-text');
-            if (revBar) revBar.style.width = rev + '%';
-            if (revText) revText.innerText = rev + '%';
+            if (revBar) revBar.style.width = g.revisionPercent + '%';
+            if (revText) revText.innerText = g.revisionPercent + '%';
             if (papersBar) papersBar.style.width = papersPct + '%';
-            if (papersText) papersText.innerText = `${done} / ${total}`;
+            if (papersText) papersText.innerText = `${g.done} / ${g.total}`;
         }
 
         function saveGoalsData() {
-            const rev = Number(document.getElementById('admin-goals-revision').value);
-            const done = Number(document.getElementById('admin-goals-papers-done').value);
-            const total = Number(document.getElementById('admin-goals-papers-total').value);
-            if (isNaN(rev) || isNaN(done) || isNaN(total) || total < 1) { showToast("Please enter valid numbers", 'error'); return; }
-            goalsData = { revisionPercent: Math.max(0, Math.min(100, rev)), papersDone: Math.max(0, done), papersTotal: Math.max(1, total) };
+            const revisionMetric = document.getElementById('admin-goals-revision-metric').value;
+            const papersMetric = document.getElementById('admin-goals-papers-metric').value;
+            goalsData = { revisionMetric, papersMetric };
             localStorage.setItem('moramaths_goals_data', JSON.stringify(goalsData));
             cloudPush();
             showToast("Goals & Achievements updated!", 'success');
         }
 
         function loadAdminGoalsForm() {
-            const r = document.getElementById('admin-goals-revision');
-            const d = document.getElementById('admin-goals-papers-done');
-            const t = document.getElementById('admin-goals-papers-total');
-            if (r) r.value = goalsData.revisionPercent;
-            if (d) d.value = goalsData.papersDone;
-            if (t) t.value = goalsData.papersTotal;
+            const r = document.getElementById('admin-goals-revision-metric');
+            const p = document.getElementById('admin-goals-papers-metric');
+            if (r) r.value = goalsData.revisionMetric || 'quizzes';
+            if (p) p.value = goalsData.papersMetric || 'quizzes';
         }
 
         /* ============ STUDY STREAK (auto-tracked daily login streak) ============ */
@@ -2573,6 +3137,10 @@
             document.getElementById('modal-profile-name').innerText = formattedName;
             document.getElementById('modal-profile-email').innerText = currentUser.email;
             document.getElementById('modal-profile-user').innerText = currentUser.username;
+            const roleEl = document.getElementById('modal-profile-role');
+            const isAdmin = isAdminUser(currentUser);
+            roleEl.innerText = isAdmin ? 'Admin' : (currentLang === 'si' ? 'ශිෂ්‍යයා' : 'Student');
+            roleEl.className = 'text-[10px] font-bold px-2 py-0.5 rounded-md whitespace-nowrap ' + (isAdmin ? 'text-yellow-300 bg-yellow-500/10 border border-yellow-500/20' : 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20');
             document.getElementById('profile-modal').classList.remove('hidden');
         }
 
@@ -3010,12 +3578,16 @@
             const dash = document.getElementById('student-dashboard');
             const gameSec = document.getElementById('game-section');
             const scheduleSec = document.getElementById('schedule-section');
+            const papersSec = document.getElementById('pastpapers-section');
+            const contactSec = document.getElementById('contact-section');
             const showingBoard = board.classList.contains('hidden');
             if (showingBoard) {
                 renderLeaderboard();
                 board.classList.remove('hidden');
                 if (gameSec) gameSec.classList.add('hidden');
                 if (scheduleSec) scheduleSec.classList.add('hidden');
+                if (papersSec) papersSec.classList.add('hidden');
+                if (contactSec) contactSec.classList.add('hidden');
                 if (dash) dash.classList.add('hidden');
             } else {
                 board.classList.add('hidden');
@@ -3028,12 +3600,16 @@
             const dash = document.getElementById('student-dashboard');
             const board = document.getElementById('leaderboard-section');
             const gameSec = document.getElementById('game-section');
+            const papersSec = document.getElementById('pastpapers-section');
+            const contactSec = document.getElementById('contact-section');
             const showing = scheduleSec.classList.contains('hidden');
             if (showing) {
                 renderWeeksGrid();
                 scheduleSec.classList.remove('hidden');
                 if (board) board.classList.add('hidden');
                 if (gameSec) gameSec.classList.add('hidden');
+                if (papersSec) papersSec.classList.add('hidden');
+                if (contactSec) contactSec.classList.add('hidden');
                 if (dash) dash.classList.add('hidden');
             } else {
                 scheduleSec.classList.add('hidden');
@@ -3067,10 +3643,14 @@
             const admin = document.getElementById('admin-panel');
             const board = document.getElementById('leaderboard-section');
             const scheduleSec = document.getElementById('schedule-section');
+            const papersSec = document.getElementById('pastpapers-section');
+            const contactSec = document.getElementById('contact-section');
             const showing = gameSec.classList.contains('hidden');
             if (showing) {
                 if (board) board.classList.add('hidden');
                 if (scheduleSec) scheduleSec.classList.add('hidden');
+                if (papersSec) papersSec.classList.add('hidden');
+                if (contactSec) contactSec.classList.add('hidden');
                 backToGameLevels();
                 gameSec.classList.remove('hidden');
                 if (dash) dash.classList.add('hidden');
@@ -3082,6 +3662,324 @@
                     else if (dash) dash.classList.remove('hidden');
                 }
             }
+        }
+
+        /* ============ PAST PAPERS (year-by-year, publish-controlled) ============ */
+        function togglePastPapersView() {
+            const papersSec = document.getElementById('pastpapers-section');
+            const dash = document.getElementById('student-dashboard');
+            const admin = document.getElementById('admin-panel');
+            const board = document.getElementById('leaderboard-section');
+            const scheduleSec = document.getElementById('schedule-section');
+            const gameSec = document.getElementById('game-section');
+            const contactSec = document.getElementById('contact-section');
+            const showing = papersSec.classList.contains('hidden');
+            if (showing) {
+                if (board) board.classList.add('hidden');
+                if (scheduleSec) scheduleSec.classList.add('hidden');
+                if (gameSec) gameSec.classList.add('hidden');
+                if (contactSec) contactSec.classList.add('hidden');
+                renderPastPapersView();
+                papersSec.classList.remove('hidden');
+                if (dash) dash.classList.add('hidden');
+                if (admin) admin.classList.add('hidden');
+            } else {
+                papersSec.classList.add('hidden');
+                if (currentUser) {
+                    if (isAdminUser(currentUser) && admin) admin.classList.remove('hidden');
+                    else if (dash) dash.classList.remove('hidden');
+                }
+            }
+        }
+
+        function renderPastPapersView() {
+            const wrap = document.getElementById('pastpapers-list');
+            if (!wrap) return;
+            const years = [...pastPapersData].sort((a, b) => b.year - a.year);
+            if (!years.length) {
+                wrap.innerHTML = `<p class="text-center text-xs text-slate-500 py-10">${currentLang === 'si' ? 'තවම Past Papers එකතු කර නැත.' : 'No past papers added yet.'}</p>`;
+                return;
+            }
+            wrap.innerHTML = years.map(y => {
+                if (!y.published) {
+                    return `
+                    <div class="bg-[#0f0c1a] border border-dashed border-slate-700 rounded-2xl p-5 flex items-center justify-between gap-3 opacity-70">
+                        <div>
+                            <p class="text-sm font-black text-white">${y.year}</p>
+                            <p class="text-[10px] text-slate-500 mt-0.5">${currentLang === 'si' ? 'ළඟදීම පලකරනු ලැබේ' : 'Coming soon — waiting to be published'}</p>
+                        </div>
+                        <i class="fa-solid fa-hourglass-half text-slate-600"></i>
+                    </div>`;
+                }
+                const solved = currentUser && !isAdminUser(currentUser) ? (currentUser.solvedPapers || []) : [];
+                return `
+                <div class="bg-[#0f0c1a] border border-slate-800 rounded-2xl p-5 space-y-3">
+                    <p class="text-sm font-black text-white flex items-center gap-2"><i class="fa-solid fa-calendar-check text-emerald-400"></i> ${y.year}</p>
+                    <div class="space-y-2">
+                        ${(y.papers || []).map(p => {
+                            const isSolved = solved.includes(p.id);
+                            return `
+                            <div class="flex items-center justify-between gap-3 bg-[#161224]/60 border border-slate-800 rounded-xl px-4 py-2.5">
+                                <span class="text-xs font-bold text-slate-200 truncate">${escapeHtml(p.title)}</span>
+                                <div class="flex items-center gap-2 shrink-0">
+                                    <a href="${escapeHtml(p.pdf)}" target="_blank" class="bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white text-[10px] font-bold px-3 py-1.5 rounded-lg border border-indigo-500/30 transition"><i class="fa-solid fa-file-pdf mr-1"></i> ${currentLang === 'si' ? 'බලන්න' : 'View'}</a>
+                                    ${currentUser && !isAdminUser(currentUser) ? `<button onclick="toggleSolvedPaper('${p.id}')" class="text-[10px] font-bold px-3 py-1.5 rounded-lg border transition ${isSolved ? 'bg-emerald-600/20 border-emerald-500/30 text-emerald-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}"><i class="fa-solid ${isSolved ? 'fa-check' : 'fa-square'} mr-1"></i> ${isSolved ? (currentLang === 'si' ? 'විසඳා ඇත' : 'Solved') : (currentLang === 'si' ? 'විසඳුවා ලෙස සලකුණු කරන්න' : 'Mark Solved')}</button>` : ''}
+                                </div>
+                            </div>`;
+                        }).join('') || `<p class="text-[10px] text-slate-600 italic">${currentLang === 'si' ? 'මෙම වසර සඳහා ප්‍රශ්න පත්‍ර නොමැත.' : 'No papers added for this year yet.'}</p>`}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function toggleSolvedPaper(paperId) {
+            if (!currentUser || isAdminUser(currentUser)) return;
+            if (!currentUser.solvedPapers) currentUser.solvedPapers = [];
+            const idx = currentUser.solvedPapers.indexOf(paperId);
+            if (idx === -1) currentUser.solvedPapers.push(paperId); else currentUser.solvedPapers.splice(idx, 1);
+            localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
+            const userIdx = users.findIndex(u => u.username === currentUser.username);
+            if (userIdx !== -1) { users[userIdx].solvedPapers = currentUser.solvedPapers; localStorage.setItem('moramaths_users', JSON.stringify(users)); }
+            cloudPush();
+            renderPastPapersView();
+            renderGoals();
+        }
+
+        /* ============ ADMIN: PAST PAPERS MANAGER ============ */
+        function renderAdminPastPapers() {
+            const wrap = document.getElementById('admin-pastpapers-list');
+            if (!wrap) return;
+            const years = [...pastPapersData].sort((a, b) => b.year - a.year);
+            if (!years.length) { wrap.innerHTML = '<p class="text-[10px] text-slate-600 italic">No years added yet.</p>'; return; }
+            wrap.innerHTML = years.map(y => `
+                <div class="bg-[#0f0c1a] border border-slate-800 rounded-2xl p-4 space-y-3">
+                    <div class="flex items-center justify-between gap-3">
+                        <p class="text-sm font-black text-white">${y.year}</p>
+                        <div class="flex items-center gap-2">
+                            <button onclick="toggleYearPublish(${y.year})" class="text-[10px] font-bold px-3 py-1.5 rounded-lg border transition ${y.published ? 'bg-emerald-600/20 border-emerald-500/30 text-emerald-300' : 'bg-slate-800 border-slate-700 text-slate-400'}"><i class="fa-solid ${y.published ? 'fa-eye' : 'fa-eye-slash'} mr-1"></i> ${y.published ? 'Published' : 'Unpublished'}</button>
+                            <button onclick="deletePaperYear(${y.year})" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid fa-trash"></i></button>
+                        </div>
+                    </div>
+                    <div class="space-y-1.5">
+                        ${(y.papers || []).map(p => `
+                            <div class="flex items-center justify-between gap-2 bg-[#161224]/60 border border-slate-800 rounded-lg px-3 py-2">
+                                <span class="text-[11px] font-bold text-slate-200 truncate">${escapeHtml(p.title)}</span>
+                                <button onclick="deletePaperFromYear(${y.year}, '${p.id}')" class="w-6 h-6 rounded-md bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white flex items-center justify-center text-[9px] cursor-pointer transition"><i class="fa-solid fa-xmark"></i></button>
+                            </div>
+                        `).join('') || '<p class="text-[10px] text-slate-600 italic">No papers yet.</p>'}
+                    </div>
+                    <div class="flex gap-2">
+                        <input type="text" id="paper-title-${y.year}" placeholder="Paper title (e.g. Model Paper 01)" class="flex-1 bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
+                        <input type="text" id="paper-pdf-${y.year}" placeholder="PDF link" class="flex-1 bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
+                        <button onclick="addPaperToYear(${y.year})" class="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold px-3 rounded-lg transition cursor-pointer">Add</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function addPaperYear() {
+            const input = document.getElementById('admin-new-paper-year');
+            const year = parseInt(input.value, 10);
+            if (!year || year < 2000 || year > 2100) { showToast("Enter a valid year", 'error'); return; }
+            if (pastPapersData.some(y => y.year === year)) { showToast("That year already exists", 'error'); return; }
+            pastPapersData.push({ year, published: false, papers: [] });
+            localStorage.setItem('moramaths_pastpapers', JSON.stringify(pastPapersData));
+            cloudPush();
+            renderAdminPastPapers();
+            input.value = '';
+            showToast(`${year} added — publish it when ready`, 'success');
+        }
+
+        function toggleYearPublish(year) {
+            const y = pastPapersData.find(x => x.year === year);
+            if (!y) return;
+            y.published = !y.published;
+            localStorage.setItem('moramaths_pastpapers', JSON.stringify(pastPapersData));
+            cloudPush();
+            renderAdminPastPapers();
+            showToast(y.published ? `${year} published to students` : `${year} unpublished`, y.published ? 'success' : 'info');
+        }
+
+        function deletePaperYear(year) {
+            if (!confirm(`Remove all of ${year}'s past papers? This cannot be undone.`)) return;
+            pastPapersData = pastPapersData.filter(y => y.year !== year);
+            localStorage.setItem('moramaths_pastpapers', JSON.stringify(pastPapersData));
+            cloudPush();
+            renderAdminPastPapers();
+        }
+
+        function addPaperToYear(year) {
+            const titleEl = document.getElementById(`paper-title-${year}`);
+            const pdfEl = document.getElementById(`paper-pdf-${year}`);
+            const title = titleEl.value.trim();
+            const pdf = pdfEl.value.trim();
+            if (!title || !pdf) { showToast("Enter both a title and a PDF link", 'error'); return; }
+            const y = pastPapersData.find(x => x.year === year);
+            if (!y) return;
+            if (!y.papers) y.papers = [];
+            y.papers.push({ id: uid(), title, pdf });
+            localStorage.setItem('moramaths_pastpapers', JSON.stringify(pastPapersData));
+            cloudPush();
+            renderAdminPastPapers();
+            showToast("Paper added", 'success');
+        }
+
+        function deletePaperFromYear(year, paperId) {
+            const y = pastPapersData.find(x => x.year === year);
+            if (!y) return;
+            y.papers = (y.papers || []).filter(p => p.id !== paperId);
+            localStorage.setItem('moramaths_pastpapers', JSON.stringify(pastPapersData));
+            cloudPush();
+            renderAdminPastPapers();
+        }
+
+        /* ============ CONTACT US (master-admin sets links; students see buttons + can message admin) ============ */
+        function toggleContactView() {
+            const contactSec = document.getElementById('contact-section');
+            const dash = document.getElementById('student-dashboard');
+            const admin = document.getElementById('admin-panel');
+            const board = document.getElementById('leaderboard-section');
+            const scheduleSec = document.getElementById('schedule-section');
+            const gameSec = document.getElementById('game-section');
+            const papersSec = document.getElementById('pastpapers-section');
+            const showing = contactSec.classList.contains('hidden');
+            if (showing) {
+                if (board) board.classList.add('hidden');
+                if (scheduleSec) scheduleSec.classList.add('hidden');
+                if (gameSec) gameSec.classList.add('hidden');
+                if (papersSec) papersSec.classList.add('hidden');
+                renderContactView();
+                contactSec.classList.remove('hidden');
+                if (dash) dash.classList.add('hidden');
+                if (admin) admin.classList.add('hidden');
+            } else {
+                contactSec.classList.add('hidden');
+                if (currentUser) {
+                    if (isAdminUser(currentUser) && admin) admin.classList.remove('hidden');
+                    else if (dash) dash.classList.remove('hidden');
+                }
+            }
+        }
+
+        function renderContactView() {
+            const wa = document.getElementById('contact-whatsapp-link');
+            const tg = document.getElementById('contact-telegram-link');
+            const waEmpty = document.getElementById('contact-whatsapp-empty');
+            const tgEmpty = document.getElementById('contact-telegram-empty');
+            if (contactData.whatsapp) { wa.href = contactData.whatsapp; wa.classList.remove('hidden'); if (waEmpty) waEmpty.classList.add('hidden'); }
+            else { wa.classList.add('hidden'); if (waEmpty) waEmpty.classList.remove('hidden'); }
+            if (contactData.telegram) { tg.href = contactData.telegram; tg.classList.remove('hidden'); if (tgEmpty) tgEmpty.classList.add('hidden'); }
+            else { tg.classList.add('hidden'); if (tgEmpty) tgEmpty.classList.remove('hidden'); }
+            renderMessageThread();
+        }
+
+        function loadAdminContactForm() {
+            const wa = document.getElementById('admin-contact-whatsapp');
+            const tg = document.getElementById('admin-contact-telegram');
+            if (wa) wa.value = contactData.whatsapp || '';
+            if (tg) tg.value = contactData.telegram || '';
+        }
+
+        function saveContactData() {
+            if (!isMasterAdmin(currentUser)) return;
+            const wa = document.getElementById('admin-contact-whatsapp').value.trim();
+            const tg = document.getElementById('admin-contact-telegram').value.trim();
+            contactData = { whatsapp: wa, telegram: tg };
+            localStorage.setItem('moramaths_contact', JSON.stringify(contactData));
+            cloudPush();
+            showToast("Contact Us links updated!", 'success');
+        }
+
+        /* ============ MESSAGING (private student <-> admin threads) ============ */
+        function renderMessageThread() {
+            const wrap = document.getElementById('my-message-thread');
+            if (!wrap || !currentUser || isAdminUser(currentUser)) return;
+            const thread = studentMessages[currentUser.username] || [];
+            if (!thread.length) {
+                wrap.innerHTML = `<p class="text-center text-[11px] text-slate-500 py-6">${currentLang === 'si' ? 'තවම පණිවිඩ නැත. පහතින් admin ට පණිවිඩයක් එවන්න.' : 'No messages yet. Send the admin a message below.'}</p>`;
+            } else {
+                wrap.innerHTML = thread.map(m => `
+                    <div class="flex ${m.from === 'admin' ? 'justify-start' : 'justify-end'}">
+                        <div class="max-w-[80%] ${m.from === 'admin' ? 'bg-indigo-600/20 border border-indigo-500/30 text-indigo-100' : 'bg-slate-800 border border-slate-700 text-slate-100'} rounded-xl px-3.5 py-2 text-xs">
+                            <p class="leading-relaxed">${escapeHtml(m.text)}</p>
+                            <p class="text-[9px] opacity-60 mt-1">${m.from === 'admin' ? 'Admin' : 'You'} · ${new Date(m.date).toLocaleString()}</p>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            wrap.scrollTop = wrap.scrollHeight;
+        }
+
+        function sendMessageToAdmin() {
+            if (!currentUser || isAdminUser(currentUser)) return;
+            const input = document.getElementById('my-message-input');
+            const text = input.value.trim();
+            if (!text) return;
+            if (!studentMessages[currentUser.username]) studentMessages[currentUser.username] = [];
+            studentMessages[currentUser.username].push({ id: uid(), from: 'student', text, date: Date.now() });
+            localStorage.setItem('moramaths_messages', JSON.stringify(studentMessages));
+            cloudPush();
+            input.value = '';
+            renderMessageThread();
+            showToast(currentLang === 'si' ? "පණිවිඩය එවන ලදී" : "Message sent to admin", 'success');
+        }
+
+        /* ============ ADMIN: MESSAGES INBOX (each thread private to that one student) ============ */
+        let viewedMessageThreadUsername = null;
+
+        function renderAdminMessagesInbox() {
+            const wrap = document.getElementById('admin-messages-inbox');
+            if (!wrap) return;
+            const usernames = Object.keys(studentMessages).filter(u => (studentMessages[u] || []).length > 0);
+            if (!usernames.length) { wrap.innerHTML = '<p class="text-[10px] text-slate-600 italic">No messages from students yet.</p>'; return; }
+            wrap.innerHTML = usernames.map(uname => {
+                const student = users.find(u => u.username === uname);
+                const thread = studentMessages[uname] || [];
+                const last = thread[thread.length - 1];
+                const unread = thread.filter(m => m.from === 'student' && !m.readByAdmin).length;
+                return `
+                <div onclick="openAdminMessageThread('${escapeHtml(uname)}')" class="cursor-pointer bg-[#0f0c1a] border ${viewedMessageThreadUsername === uname ? 'border-indigo-500/60' : 'border-slate-800'} hover:border-indigo-500/40 rounded-xl px-4 py-3 transition">
+                    <div class="flex items-center justify-between gap-2">
+                        <p class="text-xs font-bold text-white truncate">${escapeHtml(student ? toTitleCase(student.fullname) : uname)}</p>
+                        ${unread > 0 ? `<span class="text-[9px] font-bold bg-rose-500 text-white px-1.5 py-0.5 rounded-full">${unread}</span>` : ''}
+                    </div>
+                    <p class="text-[10px] text-slate-500 truncate mt-0.5">${last ? escapeHtml(last.text) : ''}</p>
+                </div>`;
+            }).join('');
+        }
+
+        function openAdminMessageThread(username) {
+            viewedMessageThreadUsername = username;
+            (studentMessages[username] || []).forEach(m => { if (m.from === 'student') m.readByAdmin = true; });
+            localStorage.setItem('moramaths_messages', JSON.stringify(studentMessages));
+            const student = users.find(u => u.username === username);
+            document.getElementById('admin-message-thread-name').innerText = student ? toTitleCase(student.fullname) : username;
+            document.getElementById('admin-message-thread-wrap').classList.remove('hidden');
+            const wrap = document.getElementById('admin-message-thread');
+            const thread = studentMessages[username] || [];
+            wrap.innerHTML = thread.map(m => `
+                <div class="flex ${m.from === 'admin' ? 'justify-end' : 'justify-start'}">
+                    <div class="max-w-[80%] ${m.from === 'admin' ? 'bg-indigo-600/20 border border-indigo-500/30 text-indigo-100' : 'bg-slate-800 border border-slate-700 text-slate-100'} rounded-xl px-3.5 py-2 text-xs">
+                        <p class="leading-relaxed">${escapeHtml(m.text)}</p>
+                        <p class="text-[9px] opacity-60 mt-1">${m.from === 'admin' ? 'You' : escapeHtml(toTitleCase((student && student.fullname) || username))} · ${new Date(m.date).toLocaleString()}</p>
+                    </div>
+                </div>
+            `).join('');
+            wrap.scrollTop = wrap.scrollHeight;
+            renderAdminMessagesInbox();
+        }
+
+        function sendAdminReply() {
+            if (!viewedMessageThreadUsername) return;
+            const input = document.getElementById('admin-message-reply-input');
+            const text = input.value.trim();
+            if (!text) return;
+            if (!studentMessages[viewedMessageThreadUsername]) studentMessages[viewedMessageThreadUsername] = [];
+            studentMessages[viewedMessageThreadUsername].push({ id: uid(), from: 'admin', text, date: Date.now() });
+            localStorage.setItem('moramaths_messages', JSON.stringify(studentMessages));
+            cloudPush();
+            input.value = '';
+            openAdminMessageThread(viewedMessageThreadUsername);
         }
 
         function renderGameLevels() {
@@ -3124,12 +4022,56 @@
             document.getElementById('game-progress-label').innerText = `${currentLang === 'si' ? 'ප්‍රශ්නය' : 'Question'} ${gameState.qIdx + 1}/${lvl.questions.length}`;
             document.getElementById('game-score-label').innerText = `${currentLang === 'si' ? 'ලකුණු' : 'Score'}: ${gameState.correct}`;
             document.getElementById('game-progress-bar').style.width = `${(gameState.qIdx / lvl.questions.length) * 100}%`;
-            document.getElementById('game-question-text').innerText = q.q;
             const optsWrap = document.getElementById('game-options');
+            document.getElementById('game-next-wrap').classList.add('hidden');
+
+            if (lvl.type === 'numeric') {
+                document.getElementById('game-question-text').innerText = currentLang === 'si'
+                    ? 'ප්‍රශ්නාර්ථ ලකුණ ( ? ) වෙනුවට එන නිවැරදි සංඛ්‍යාව සොයන්න:'
+                    : 'Find the number that replaces the question mark ( ? ):';
+                optsWrap.innerHTML = `
+                    <div class="bg-[#0f0c1a] border-2 border-dashed border-indigo-500/60 text-rose-300 text-xl sm:text-2xl font-black tracking-widest text-center py-5 rounded-2xl">${q.q}</div>
+                    <div class="flex gap-2.5 mt-3">
+                        <input type="number" id="game-numeric-input" placeholder="${currentLang === 'si' ? 'පිළිතුර' : 'Answer'}" class="flex-1 bg-[#0f0c1a] border border-slate-800 focus:border-indigo-500 outline-none rounded-xl px-4 py-3 text-sm text-white text-center" onkeypress="if(event.key==='Enter') submitNumericGameAnswer();">
+                        <button onclick="submitNumericGameAnswer()" class="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold px-5 rounded-xl transition shadow-xl cursor-pointer">${currentLang === 'si' ? 'පරීක්ෂා කරන්න' : 'Check'}</button>
+                    </div>
+                    <p id="game-numeric-hint" class="text-[10px] text-slate-500 mt-2 min-h-[14px]"></p>
+                `;
+                setTimeout(() => { const el = document.getElementById('game-numeric-input'); if (el) el.focus(); }, 50);
+                return;
+            }
+
+            document.getElementById('game-question-text').innerText = q.q;
             optsWrap.innerHTML = q.options.map((opt, oi) => `
                 <div onclick="selectGameAnswer(${oi})" id="game-opt-${oi}" class="quiz-option cursor-pointer bg-[#0f0c1a] border border-slate-800 px-4 py-3 rounded-xl text-xs sm:text-sm text-slate-200">${opt}</div>
             `).join('');
-            document.getElementById('game-next-wrap').classList.add('hidden');
+        }
+
+        function submitNumericGameAnswer() {
+            if (!gameState || gameState.answered) return;
+            const lvl = mathGameLevels[gameState.levelIdx];
+            const q = lvl.questions[gameState.qIdx];
+            const input = document.getElementById('game-numeric-input');
+            const val = parseInt(input.value, 10);
+            const hintEl = document.getElementById('game-numeric-hint');
+            if (isNaN(val)) {
+                hintEl.textContent = currentLang === 'si' ? 'කරුණාකර පිළිතුරක් ඇතුළත් කරන්න!' : 'Please enter an answer!';
+                hintEl.className = 'text-[10px] mt-2 min-h-[14px] text-rose-400 font-bold';
+                return;
+            }
+            gameState.answered = true;
+            input.disabled = true;
+            const correct = val === q.ans;
+            input.className = input.className.replace('border-slate-800', correct ? 'border-emerald-500' : 'border-rose-500');
+            if (correct) gameState.correct++;
+            hintEl.textContent = (correct ? (currentLang === 'si' ? 'නිවැරදියි! ' : 'Correct! ') : (currentLang === 'si' ? `වැරදියි — නිවැරදි පිළිතුර: ${q.ans}. ` : `Incorrect — correct answer: ${q.ans}. `)) + q.hint;
+            hintEl.className = 'text-[10px] mt-2 min-h-[14px] font-bold ' + (correct ? 'text-emerald-400' : 'text-rose-400');
+            document.getElementById('game-score-label').innerText = `${currentLang === 'si' ? 'ලකුණු' : 'Score'}: ${gameState.correct}`;
+            const isLast = gameState.qIdx === lvl.questions.length - 1;
+            document.getElementById('game-next-btn').innerText = isLast
+                ? (currentLang === 'si' ? 'ප්‍රතිඵලය බලන්න →' : 'View Result →')
+                : (currentLang === 'si' ? 'ඊළඟ ප්‍රශ්නය →' : 'Next Question →');
+            document.getElementById('game-next-wrap').classList.remove('hidden');
         }
 
         function selectGameAnswer(oi) {
@@ -3473,18 +4415,31 @@
             if (!students.length) { wrap.innerHTML = '<p class="text-[10px] text-slate-600 italic">No students registered yet.</p>'; return; }
             wrap.innerHTML = students.map(u => {
                 const stats = computeUserStats(u);
+                const banned = !!u.banned;
                 return `
-                <div class="flex items-center justify-between gap-3 bg-[#0f0c1a] border border-slate-800 rounded-xl px-4 py-3">
+                <div class="flex items-center justify-between gap-3 bg-[#0f0c1a] border ${banned ? 'border-rose-800/60' : 'border-slate-800'} rounded-xl px-4 py-3">
                     <div class="min-w-0">
-                        <p class="text-xs font-bold text-white truncate">${escapeHtml(toTitleCase(u.fullname))} <span class="text-slate-500 font-normal">@${escapeHtml(u.username)}</span></p>
+                        <p class="text-xs font-bold text-white truncate">${escapeHtml(toTitleCase(u.fullname))} <span class="text-slate-500 font-normal">@${escapeHtml(u.username)}</span> ${banned ? '<span class="text-[9px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/30 px-1.5 py-0.5 rounded-md ml-1">BANNED</span>' : ''}</p>
                         <p class="text-[10px] text-slate-500 truncate">${escapeHtml(u.email)} • ${stats.attempted} quizzes • ${stats.accuracy}% accuracy</p>
                     </div>
                     <div class="flex gap-1.5 shrink-0">
                         <button onclick="openStudentProgressModal('${escapeHtml(u.username)}')" title="View Progress" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid fa-chart-line"></i></button>
+                        ${isMasterAdmin(currentUser) ? `<button onclick="toggleBanUser('${escapeHtml(u.username)}')" title="${banned ? 'Unban Student' : 'Ban Student'}" class="w-7 h-7 rounded-lg ${banned ? 'bg-emerald-700/40 hover:bg-emerald-600' : 'bg-slate-800 hover:bg-amber-600'} text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid ${banned ? 'fa-lock-open' : 'fa-ban'}"></i></button>` : ''}
                         <button onclick="deleteUser('${escapeHtml(u.username)}')" title="Remove Student" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid fa-user-slash"></i></button>
                     </div>
                 </div>`;
             }).join('');
+        }
+
+        function toggleBanUser(username) {
+            if (!isMasterAdmin(currentUser)) return;
+            const u = users.find(x => x.username === username);
+            if (!u) return;
+            u.banned = !u.banned;
+            localStorage.setItem('moramaths_users', JSON.stringify(users));
+            cloudPush();
+            renderAdminUsersList();
+            showToast(u.banned ? `${toTitleCase(u.fullname)} has been banned` : `${toTitleCase(u.fullname)} has been unbanned`, u.banned ? 'error' : 'success');
         }
 
         function deleteUser(username) {
@@ -3714,7 +4669,7 @@
             const heroSlot = document.getElementById('auth-hero-visual');
             if (heroSlot) {
                 heroSlot.innerHTML = siteAssets.heroImage
-                    ? `<img src="${siteAssets.heroImage}" alt="MoraMaths" class="w-full h-full object-cover rounded-3xl">`
+                    ? `<img src="${siteAssets.heroImage}" alt="MathLab" class="w-full h-full object-cover rounded-3xl">`
                     : defaultHeroIllustrationSVG;
             }
             const banner = document.getElementById('dashboard-banner-layer');
