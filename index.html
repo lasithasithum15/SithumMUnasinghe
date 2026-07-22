@@ -131,7 +131,7 @@
     <script>
         /* Bump this on every meaningful release so it's easy to tell which build
            is running (shown in the nav badge, footer, and this console line). */
-        const APP_VERSION = "3.0.0";
+        const APP_VERSION = "3.1.0";
         console.log(`%cMathLab By Sithum Munasinghe v${APP_VERSION}`, 'color:#818cf8;font-weight:bold;font-size:12px;');
 
         /* Live clock shown on the student dashboard — updates every second. Safe to run
@@ -226,6 +226,7 @@
         function openFocusMode() {
             document.getElementById('focus-mode-modal').classList.remove('hidden');
             document.body.style.overflow = 'hidden';
+            renderFocusTimer();
             updateMiniPlayer();
             switchSongPlaylistTab(activeSongLang || 'english');
         }
@@ -705,6 +706,7 @@
 
         function switchSongPlaylistTab(lang) {
             activeSongLang = lang;
+            stopSongPlayer();
             ['english', 'sinhala', 'hindi'].forEach(l => {
                 const btn = document.getElementById(`song-tab-${l}`);
                 if (!btn) return;
@@ -747,6 +749,37 @@
             if (!wrap || !iframe) return;
             iframe.src = '';
             wrap.classList.add('hidden');
+        }
+
+        /* YouTube's oEmbed endpoint fails (401/403) for videos the owner has blocked from
+           playing on other sites — this is exactly what causes "Error 153" in the player
+           later. Checking it here lets us warn the admin about a bad link BEFORE they save
+           it, instead of a student hitting the broken player afterwards. Best-effort only:
+           if the check itself fails (offline, CORS hiccup, etc.) we don't block saving. */
+        async function checkYouTubeEmbeddable(videoId) {
+            try {
+                const res = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+                if (res.status === 401 || res.status === 403) return false; // owner disabled embedding
+                if (!res.ok) return null; // inconclusive — don't block on network hiccups
+                return true;
+            } catch (e) {
+                return null; // inconclusive (e.g. offline) — don't block saving
+            }
+        }
+
+        function previewSongUrl(lang) {
+            const urlEl = document.getElementById(`admin-song-url-${lang}`);
+            const url = urlEl.value.trim();
+            const videoId = extractYouTubeId(url);
+            if (!videoId) { showToast("Paste a valid YouTube link first", 'error'); return; }
+            const wrap = document.getElementById('admin-song-preview-wrap');
+            const iframe = document.getElementById('admin-song-preview-iframe');
+            iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
+            wrap.classList.remove('hidden');
+            wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            checkYouTubeEmbeddable(videoId).then(ok => {
+                if (ok === false) showToast("⚠️ This video's owner has disabled embedding — students will see Error 153. Try a different link.", 'error');
+            });
         }
 
         /* ============ ADMIN: SONG PLAYLISTS MANAGER ============ */
@@ -900,7 +933,10 @@
                 <span id="sidebar-focus-live-dot" class="hidden w-1.5 h-1.5 rounded-full bg-emerald-400 ml-auto animate-pulse"></span>
             </div>
             <div class="sidebar-link" id="sidebar-link-pastpapers" onclick="sidebarAction('pastpapers')"><i class="fa-solid fa-file-lines w-4 text-center text-sky-400"></i> <span id="txt-sidebar-pastpapers">Past Papers</span></div>
-            <div class="sidebar-link" id="sidebar-link-contact" onclick="sidebarAction('contact')"><i class="fa-solid fa-headset w-4 text-center text-amber-400"></i> <span id="txt-sidebar-contact">Contact Us</span></div>
+            <div class="sidebar-link" id="sidebar-link-contact" onclick="sidebarAction('contact')">
+                <i class="fa-solid fa-headset w-4 text-center text-amber-400"></i> <span id="txt-sidebar-contact">Contact Us</span>
+                <span id="sidebar-contact-unread-badge" class="hidden ml-auto min-w-[16px] h-4 px-1 bg-rose-500 rounded-full text-[9px] font-bold flex items-center justify-center text-white">0</span>
+            </div>
 
             <p class="sidebar-section-label mt-3" id="txt-sidebar-account">Account</p>
             <div class="sidebar-link" onclick="openProfileModal()"><i class="fa-regular fa-user w-4 text-center text-indigo-300"></i> <span id="txt-sidebar-profile">My Profile</span></div>
@@ -942,7 +978,7 @@
                     <i class="fa-solid fa-bell text-indigo-300"></i>
                     <span id="notif-badge" class="hidden absolute -top-1 -right-1 w-4 h-4 bg-rose-500 notif-dot rounded-full text-[9px] font-bold flex items-center justify-center text-white">0</span>
                 </button>
-                <div id="notif-dropdown" class="hidden pop-in fixed sm:absolute left-1/2 sm:left-auto -translate-x-1/2 sm:translate-x-0 top-[72px] sm:top-auto right-auto sm:right-0 sm:mt-2 w-[calc(100vw-2rem)] max-w-72 sm:w-72 bg-[#161224] border border-slate-800 rounded-2xl shadow-2xl z-30 overflow-hidden">
+                <div id="notif-dropdown" class="hidden pop-in fixed sm:absolute left-4 right-4 sm:left-auto sm:right-0 top-[72px] sm:top-auto sm:mt-2 w-auto sm:w-72 bg-[#161224] border border-slate-800 rounded-2xl shadow-2xl z-30 overflow-hidden">
                     <div class="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
                         <span class="text-xs font-extrabold text-white" id="notif-panel-title">Notifications</span>
                         <button onclick="closeNotifDropdown()" class="text-slate-500 hover:text-white text-xs cursor-pointer"><i class="fa-solid fa-xmark"></i></button>
@@ -1014,6 +1050,7 @@
                     <input type="password" id="login-password" required class="w-full bg-[#0f0c1a] border border-slate-800 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-indigo-500 transition shadow-inner" placeholder="••••••••">
                 </div>
                 <button type="submit" id="btn-login-submit" class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold py-3.5 rounded-xl transition shadow-xl cursor-pointer tracking-wide mt-2 shine-btn">Login Now</button>
+                <button type="button" onclick="openForgotPasswordModal()" id="txt-forgot-password" class="w-full text-center text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition cursor-pointer mt-1">මුරපදය අමතක වුනාද? (Forgot Password?)</button>
             </form>
 
             <!-- REGISTER -->
@@ -1187,13 +1224,28 @@
         <div id="game-section" class="hidden w-full max-w-6xl space-y-6">
             <div class="bg-[#161224]/90 backdrop-blur-2xl border border-slate-800/80 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5">
                 <div class="flex items-center justify-between border-b border-slate-800 pb-4 gap-3">
-                    <h2 class="text-lg font-black text-white flex items-center gap-2"><i class="fa-solid fa-gamepad text-emerald-400"></i> <span id="game-title">O/L Maths Level Game — 17 Levels</span></h2>
+                    <h2 class="text-lg font-black text-white flex items-center gap-2"><i class="fa-solid fa-gamepad text-emerald-400"></i> <span id="game-title">O/L Maths Level Game — 16 Levels</span></h2>
                     <button onclick="toggleGameView()" class="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-xl cursor-pointer transition"><i class="fa-solid fa-arrow-left mr-1"></i> <span id="game-back">Back</span></button>
                 </div>
                 <p id="game-sub" class="text-xs text-slate-400 -mt-2">සිංහල මාධ්‍යයෙන් O/L ගණිත විෂය නිර්දේශයට අනුව සකසන ලද මට්ටම් 16ක ක්‍රීඩාවකි. එක් එක් මට්ටම සමත් වී ඊළඟ මට්ටම අගුළු හරින්න!</p>
 
                 <!-- LEVEL SELECT GRID -->
                 <div id="game-levels-grid" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
+
+                <!-- BONUS CHALLENGE — a separate, harder, standalone game (not part of the 16-level chain) -->
+                <div id="bonus-challenge-card" class="bg-gradient-to-r from-amber-500/10 to-rose-500/10 border border-amber-500/30 rounded-2xl p-5 flex flex-col sm:flex-row items-center gap-4 justify-between">
+                    <div class="flex items-center gap-3 text-left">
+                        <div class="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-300 flex items-center justify-center text-lg shrink-0"><i class="fa-solid fa-brain"></i></div>
+                        <div>
+                            <p class="text-sm font-black text-white flex items-center gap-2" id="bonus-challenge-title">Bonus Challenge — සංඛ්‍යා රටා IQ</p>
+                            <p class="text-[11px] text-slate-400" id="bonus-challenge-sub">වෙනම, තරමක් අභියෝගාත්මක ක්‍රීඩාවක් — රටා ප්‍රශ්න 16ක්. හොඳම ලකුණු save වේ.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3 shrink-0">
+                        <span id="bonus-challenge-best" class="hidden text-[11px] font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-lg whitespace-nowrap"></span>
+                        <button onclick="startBonusChallenge()" class="bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition shadow-lg cursor-pointer whitespace-nowrap"><i class="fa-solid fa-play mr-1.5"></i><span id="bonus-challenge-btn-text">Play</span></button>
+                    </div>
+                </div>
 
                 <!-- GAME PLAY AREA -->
                 <div id="game-play-area" class="hidden space-y-5">
@@ -1257,6 +1309,14 @@
                         <div class="text-left"><p class="text-xs font-black">Telegram</p><p class="text-[10px] opacity-70">Join our channel/chat</p></div>
                     </a>
                     <p id="contact-telegram-empty" class="hidden bg-[#0f0c1a] border border-dashed border-slate-700 text-slate-500 rounded-2xl px-4 py-4 text-[11px] flex items-center">Telegram not set up yet.</p>
+                    <a id="contact-phone1-link" href="#" class="hidden bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-300 rounded-2xl px-4 py-4 flex items-center gap-3 transition">
+                        <i class="fa-solid fa-phone text-xl"></i>
+                        <div class="text-left"><p class="text-xs font-black">Call Us</p><p id="contact-phone1-number" class="text-[10px] opacity-70"></p></div>
+                    </a>
+                    <a id="contact-phone2-link" href="#" class="hidden bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-300 rounded-2xl px-4 py-4 flex items-center gap-3 transition">
+                        <i class="fa-solid fa-phone text-xl"></i>
+                        <div class="text-left"><p class="text-xs font-black">Call Us</p><p id="contact-phone2-number" class="text-[10px] opacity-70"></p></div>
+                    </a>
                 </div>
 
                 <div id="my-message-panel" class="bg-[#0f0c1a] border border-slate-800 rounded-2xl p-4 space-y-3">
@@ -1321,6 +1381,7 @@
                                         <i class="fa-solid fa-upload"></i> <span id="admin-pdf-upload-label">PDF file එකක් upload කරන්න (optional)</span>
                                         <input type="file" accept="application/pdf" class="hidden" onchange="handlePdfFileSelect(this, 'admin-pdf-link', 'admin-pdf-upload-label')">
                                     </label>
+                                    <p class="text-[9px] text-slate-600 mt-1 leading-relaxed">Drive link use කරනවා නම්: folder එක නෙවෙයි, තනි file එක open කරලා ඒකේම Share → Copy link එක දාන්න.</p>
                                 </div>
                                 <div>
                                     <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Activities / Quiz Link</label>
@@ -1410,7 +1471,10 @@
                                 <div class="flex flex-col gap-2">
                                     <input type="text" id="admin-song-title-english" placeholder="Song title" class="w-full bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
                                     <input type="text" id="admin-song-url-english" placeholder="YouTube link" class="w-full bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
-                                    <button onclick="addSongToPlaylist('english')" class="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold py-2 rounded-lg transition cursor-pointer">Add Song</button>
+                                    <div class="flex gap-2">
+                                        <button onclick="previewSongUrl('english')" class="flex-1 bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold py-2 rounded-lg transition cursor-pointer"><i class="fa-solid fa-eye mr-1"></i>Preview</button>
+                                        <button onclick="addSongToPlaylist('english')" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold py-2 rounded-lg transition cursor-pointer">Add Song</button>
+                                    </div>
                                 </div>
                                 <div id="admin-songs-english" class="space-y-1.5 pt-1"></div>
                             </div>
@@ -1419,7 +1483,10 @@
                                 <div class="flex flex-col gap-2">
                                     <input type="text" id="admin-song-title-sinhala" placeholder="Song title" class="w-full bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
                                     <input type="text" id="admin-song-url-sinhala" placeholder="YouTube link" class="w-full bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
-                                    <button onclick="addSongToPlaylist('sinhala')" class="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold py-2 rounded-lg transition cursor-pointer">Add Song</button>
+                                    <div class="flex gap-2">
+                                        <button onclick="previewSongUrl('sinhala')" class="flex-1 bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold py-2 rounded-lg transition cursor-pointer"><i class="fa-solid fa-eye mr-1"></i>Preview</button>
+                                        <button onclick="addSongToPlaylist('sinhala')" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold py-2 rounded-lg transition cursor-pointer">Add Song</button>
+                                    </div>
                                 </div>
                                 <div id="admin-songs-sinhala" class="space-y-1.5 pt-1"></div>
                             </div>
@@ -1428,10 +1495,20 @@
                                 <div class="flex flex-col gap-2">
                                     <input type="text" id="admin-song-title-hindi" placeholder="Song title" class="w-full bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
                                     <input type="text" id="admin-song-url-hindi" placeholder="YouTube link" class="w-full bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
-                                    <button onclick="addSongToPlaylist('hindi')" class="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold py-2 rounded-lg transition cursor-pointer">Add Song</button>
+                                    <div class="flex gap-2">
+                                        <button onclick="previewSongUrl('hindi')" class="flex-1 bg-slate-800 hover:bg-slate-700 text-white text-[11px] font-bold py-2 rounded-lg transition cursor-pointer"><i class="fa-solid fa-eye mr-1"></i>Preview</button>
+                                        <button onclick="addSongToPlaylist('hindi')" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold py-2 rounded-lg transition cursor-pointer">Add Song</button>
+                                    </div>
                                 </div>
                                 <div id="admin-songs-hindi" class="space-y-1.5 pt-1"></div>
                             </div>
+                        </div>
+                        <div id="admin-song-preview-wrap" class="hidden space-y-2">
+                            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Preview</p>
+                            <div class="aspect-video w-full max-w-sm rounded-2xl overflow-hidden border border-slate-800 shadow-inner">
+                                <iframe id="admin-song-preview-iframe" class="w-full h-full" src="" title="Preview" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                            </div>
+                            <p class="text-[9px] text-slate-500">If this shows a playback error (e.g. "Error 153"), that video's owner has disabled embedding — pick a different link before adding it.</p>
                         </div>
                         <p class="text-[9px] text-slate-600">Please only link songs you have the right to share — this embeds YouTube's official player, it doesn't store any audio on this site.</p>
                     </div>
@@ -1467,7 +1544,16 @@
                                 <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Telegram Link</label>
                                 <input type="text" id="admin-contact-telegram" placeholder="https://t.me/yourchannel" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition">
                             </div>
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Phone Number 1</label>
+                                <input type="text" id="admin-contact-phone1" placeholder="071 234 5678" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition">
+                            </div>
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Phone Number 2 (optional)</label>
+                                <input type="text" id="admin-contact-phone2" placeholder="077 987 6543" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition">
+                            </div>
                         </div>
+                        <p class="text-[9px] text-slate-600">හිස්ව තියන්නම් ඒ slot එක Contact Us page එකේ පේන්නේ නෑ — පුරවපු ඒවා විතරයි පේන්නේ.</p>
                         <button onclick="saveContactData()" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-6 py-3 rounded-xl transition cursor-pointer shadow-lg"><i class="fa-solid fa-floppy-disk mr-1"></i> Save Contact Links</button>
                     </div>
                 </div>
@@ -1606,7 +1692,41 @@
         </div>
     </div>
 
-    <!-- WEEK LESSONS MODAL -->
+    <!-- BANNED ACCOUNT MODAL — shown instead of a vague toast, so a suspended student actually knows how to reach the admin -->
+    <div id="banned-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-[#161224] border border-rose-800/60 p-6 sm:p-8 rounded-3xl w-full max-w-sm space-y-4 text-center shadow-2xl relative">
+            <button onclick="closeBannedModal()" class="absolute top-4 right-4 w-8 h-8 rounded-xl bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center text-xs cursor-pointer transition"><i class="fa-solid fa-xmark"></i></button>
+            <div class="w-14 h-14 rounded-2xl bg-rose-600/15 border border-rose-500/30 text-rose-400 flex items-center justify-center text-xl mx-auto"><i class="fa-solid fa-ban"></i></div>
+            <h3 id="banned-modal-title" class="text-sm font-black text-white">ඔබගේ ගිණුම අත්හිටුවා ඇත</h3>
+            <p id="banned-modal-desc" class="text-xs text-slate-400 leading-relaxed">මෙය වැරදීමක් යැයි සිතන්නේ නම්, පහත ක්‍රමයකින් Admin අමතන්න:</p>
+            <div id="banned-modal-contacts" class="space-y-2 text-left"></div>
+            <p id="banned-modal-empty" class="hidden text-[11px] text-slate-500 italic">Admin තවම contact details set කර නැත.</p>
+        </div>
+    </div>
+
+    <!-- FORGOT PASSWORD MODAL -->
+    <div id="forgot-password-modal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-[#161224] border border-slate-800 p-6 sm:p-8 rounded-3xl w-full max-w-sm space-y-4 text-center shadow-2xl relative">
+            <button onclick="closeForgotPasswordModal()" class="absolute top-4 right-4 w-8 h-8 rounded-xl bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center text-xs cursor-pointer transition"><i class="fa-solid fa-xmark"></i></button>
+            <div class="w-14 h-14 rounded-2xl bg-indigo-600/15 border border-indigo-500/30 text-indigo-400 flex items-center justify-center text-xl mx-auto"><i class="fa-solid fa-key"></i></div>
+
+            <div id="fp-step-email">
+                <h3 class="text-sm font-black text-white mb-1.5">මුරපදය අමතක වුනාද?</h3>
+                <p class="text-xs text-slate-400 leading-relaxed mb-4">ලියාපදිංචි වූ Email එක දෙන්න — reset කරන්න OTP එකක් එවන්නම්.</p>
+                <input type="email" id="fp-email-input" placeholder="you@email.com" class="w-full bg-[#0f0c1a] border border-slate-800 rounded-xl px-4 py-3 text-center text-xs text-white font-bold focus:border-indigo-500 focus:outline-none shadow-inner mb-3">
+                <button onclick="sendForgotPasswordOtp()" id="fp-send-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 rounded-xl transition shadow-lg cursor-pointer">OTP එවන්න (Send OTP)</button>
+            </div>
+
+            <div id="fp-step-reset" class="hidden">
+                <h3 class="text-sm font-black text-white mb-1.5">Reset Password</h3>
+                <p class="text-xs text-slate-400 leading-relaxed mb-4">Email එකට ලැබුණු OTP එකයි, අලුත් password එකයි දෙන්න.</p>
+                <input type="text" id="fp-otp-input" inputmode="numeric" maxlength="6" placeholder="OTP (123456)" class="w-full bg-[#0f0c1a] border border-slate-800 rounded-2xl px-4 py-3 text-center text-lg tracking-widest text-white font-black focus:border-indigo-500 focus:outline-none shadow-inner mb-3">
+                <input type="password" id="fp-newpass-input" placeholder="New Password" class="w-full bg-[#0f0c1a] border border-slate-800 rounded-xl px-4 py-3 text-center text-xs text-white font-bold focus:border-indigo-500 focus:outline-none shadow-inner mb-3">
+                <button onclick="confirmPasswordReset()" id="fp-reset-btn" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-3 rounded-xl transition shadow-lg cursor-pointer">Password එක වෙනස් කරන්න</button>
+                <button onclick="resendForgotPasswordOtp()" class="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition cursor-pointer mt-3"><i class="fa-solid fa-rotate-right mr-1"></i> Resend OTP</button>
+            </div>
+        </div>
+    </div>
     <div id="week-modal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
         <div class="bg-[#161224] border border-slate-800 p-6 sm:p-7 rounded-3xl w-full max-w-lg space-y-5 shadow-2xl relative">
             <div class="flex justify-between items-center border-b border-slate-800 pb-3.5 gap-2">
@@ -1649,6 +1769,7 @@
                     <i class="fa-solid fa-upload"></i> <span id="edit-pdf-upload-label">PDF file එකක් upload කරන්න (optional)</span>
                     <input type="file" accept="application/pdf" class="hidden" onchange="handlePdfFileSelect(this, 'edit-lesson-pdf', 'edit-pdf-upload-label')">
                 </label>
+                <p class="text-[9px] text-slate-600 mt-1 leading-relaxed">Drive link use කරනවා නම්: folder එක නෙවෙයි, තනි file එක open කරලා ඒකේම Share → Copy link එක දාන්න.</p>
             </div>
             <div class="space-y-1">
                 <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">පාඩම HTML / UI Code (Full-Screen Viewer)</label>
@@ -1705,29 +1826,65 @@
         </div>
     </div>
 
+    <!-- PAID ACCESS MANAGEMENT MODAL (admin grants/extends/revokes a student's subscription) -->
+    <div id="access-modal" class="hidden fixed inset-0 z-[65] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-[#161224] border border-slate-800 p-6 rounded-3xl w-full max-w-sm space-y-5 shadow-2xl relative pop-in">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <div>
+                    <h3 class="text-sm font-black text-white flex items-center gap-2"><i class="fa-solid fa-crown text-amber-400"></i> Manage Access</h3>
+                    <p id="access-modal-student-name" class="text-[11px] text-slate-500 mt-0.5">Student</p>
+                </div>
+                <button onclick="closeAccessModal()" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center text-xs cursor-pointer transition shrink-0"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div id="access-modal-current-status" class="bg-[#0f0c1a] border border-slate-800 rounded-xl px-4 py-3 text-xs text-slate-300"></div>
+
+            <div class="space-y-2">
+                <label class="text-[11px] font-bold text-slate-400">Subscription valid until</label>
+                <input type="date" id="access-modal-date-input" class="w-full bg-[#0f0c1a] border border-slate-800 focus:border-indigo-500 outline-none rounded-xl px-4 py-2.5 text-sm text-white transition">
+            </div>
+
+            <div class="grid grid-cols-4 gap-2">
+                <button onclick="setAccessQuickPreset(1)" class="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 text-[10px] font-bold py-2 rounded-lg transition cursor-pointer">+1 mo</button>
+                <button onclick="setAccessQuickPreset(3)" class="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 text-[10px] font-bold py-2 rounded-lg transition cursor-pointer">+3 mo</button>
+                <button onclick="setAccessQuickPreset(6)" class="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 text-[10px] font-bold py-2 rounded-lg transition cursor-pointer">+6 mo</button>
+                <button onclick="setAccessQuickPreset(12)" class="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-200 text-[10px] font-bold py-2 rounded-lg transition cursor-pointer">+1 yr</button>
+            </div>
+            <p class="text-[9px] text-slate-600">Quick presets add on top of today's date — set the exact date field above instead if you want to extend from their current expiry.</p>
+
+            <div class="flex gap-2.5 pt-1">
+                <button onclick="saveAccessModal()" class="flex-1 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white text-xs font-bold py-3 rounded-xl transition shadow-lg cursor-pointer"><i class="fa-solid fa-check mr-1.5"></i> Save Access</button>
+                <button onclick="revokeAccessModal()" class="bg-slate-900/80 hover:bg-rose-600 border border-slate-800 text-slate-300 hover:text-white text-xs font-bold px-4 rounded-xl transition cursor-pointer" title="Revoke access"><i class="fa-solid fa-ban"></i></button>
+            </div>
+        </div>
+    </div>
+
     <!-- FOCUS MODE MODAL -->
-    <div id="focus-mode-modal" class="hidden fixed inset-0 z-[70] bg-[#0b0914] flex items-center justify-center p-4 overflow-hidden">
-        <div class="absolute inset-0 opacity-40" style="background: radial-gradient(circle at 30% 20%, rgba(99,102,241,0.35), transparent 55%), radial-gradient(circle at 75% 80%, rgba(168,85,247,0.3), transparent 55%);"></div>
-        <button onclick="closeFocusMode()" class="absolute top-5 right-5 w-10 h-10 rounded-2xl bg-slate-900/80 border border-slate-800 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer transition z-10"><i class="fa-solid fa-xmark"></i></button>
+    <div id="focus-mode-modal" class="hidden fixed inset-0 z-[70] bg-[#0b0914]">
+        <div class="absolute inset-0 opacity-40 pointer-events-none" style="background: radial-gradient(circle at 30% 20%, rgba(99,102,241,0.35), transparent 55%), radial-gradient(circle at 75% 80%, rgba(168,85,247,0.3), transparent 55%);"></div>
+        <button onclick="closeFocusMode()" class="fixed top-5 right-5 w-10 h-10 rounded-2xl bg-slate-900/80 border border-slate-800 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer transition z-20"><i class="fa-solid fa-xmark"></i></button>
 
-        <div class="relative z-10 w-full max-w-md text-center space-y-8">
-            <div>
-                <p class="text-[11px] font-bold text-indigo-300 uppercase tracking-[0.2em] mb-2"><i class="fa-solid fa-brain mr-1.5"></i> Focus Mode</p>
-                <p id="focus-timer-display" class="text-6xl sm:text-7xl font-black text-white tabular-nums tracking-tight">25:00</p>
-                <p id="focus-timer-sub" class="text-xs text-slate-500 mt-2">Deep work session</p>
-            </div>
+        <div class="relative z-10 h-full w-full overflow-y-auto flex items-start justify-center p-4 pt-4 sm:pt-6 pb-10" style="scroll-behavior: smooth; -webkit-overflow-scrolling: touch;">
+        <div class="w-full max-w-md text-center space-y-8">
+            <div class="sticky top-0 z-20 bg-[#0b0914]/95 backdrop-blur-xl -mx-4 px-4 pt-12 sm:pt-2 pb-3 space-y-5">
+                <div>
+                    <p class="text-[11px] font-bold text-indigo-300 uppercase tracking-[0.2em] mb-2"><i class="fa-solid fa-brain mr-1.5"></i> Focus Mode</p>
+                    <p id="focus-timer-display" class="text-6xl sm:text-7xl font-black text-white tabular-nums tracking-tight">25:00</p>
+                    <p id="focus-timer-sub" class="text-xs text-slate-500 mt-2">Deep work session</p>
+                </div>
 
-            <div class="flex items-center justify-center gap-2.5">
-                <button onclick="setFocusDuration(25)" class="focus-dur-btn bg-slate-900/80 hover:bg-indigo-600 border border-slate-800 text-slate-300 hover:text-white text-xs font-bold px-4 py-2 rounded-xl transition cursor-pointer" data-mins="25">25 min</button>
-                <button onclick="setFocusDuration(45)" class="focus-dur-btn bg-slate-900/80 hover:bg-indigo-600 border border-slate-800 text-slate-300 hover:text-white text-xs font-bold px-4 py-2 rounded-xl transition cursor-pointer" data-mins="45">45 min</button>
-                <button onclick="setFocusDuration(60)" class="focus-dur-btn bg-slate-900/80 hover:bg-indigo-600 border border-slate-800 text-slate-300 hover:text-white text-xs font-bold px-4 py-2 rounded-xl transition cursor-pointer" data-mins="60">60 min</button>
-            </div>
+                <div class="flex items-center justify-center gap-2.5">
+                    <button onclick="setFocusDuration(25)" class="focus-dur-btn bg-slate-900/80 hover:bg-indigo-600 border border-slate-800 text-slate-300 hover:text-white text-xs font-bold px-4 py-2 rounded-xl transition cursor-pointer" data-mins="25">25 min</button>
+                    <button onclick="setFocusDuration(45)" class="focus-dur-btn bg-slate-900/80 hover:bg-indigo-600 border border-slate-800 text-slate-300 hover:text-white text-xs font-bold px-4 py-2 rounded-xl transition cursor-pointer" data-mins="45">45 min</button>
+                    <button onclick="setFocusDuration(60)" class="focus-dur-btn bg-slate-900/80 hover:bg-indigo-600 border border-slate-800 text-slate-300 hover:text-white text-xs font-bold px-4 py-2 rounded-xl transition cursor-pointer" data-mins="60">60 min</button>
+                </div>
 
-            <div class="flex items-center justify-center gap-3">
-                <button onclick="toggleFocusTimer()" id="focus-play-btn" class="shine-btn bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-sm font-bold px-8 py-3.5 rounded-2xl transition shadow-xl cursor-pointer flex items-center gap-2">
-                    <i class="fa-solid fa-play" id="focus-play-icon"></i> <span id="focus-play-text">Start</span>
-                </button>
-                <button onclick="resetFocusTimer()" class="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white w-12 h-12 rounded-2xl transition cursor-pointer flex items-center justify-center" title="Reset"><i class="fa-solid fa-rotate-left"></i></button>
+                <div class="flex items-center justify-center gap-3">
+                    <button onclick="toggleFocusTimer()" id="focus-play-btn" class="shine-btn bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-sm font-bold px-8 py-3.5 rounded-2xl transition shadow-xl cursor-pointer flex items-center gap-2">
+                        <i class="fa-solid fa-play" id="focus-play-icon"></i> <span id="focus-play-text">Start</span>
+                    </button>
+                    <button onclick="resetFocusTimer()" class="bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white w-12 h-12 rounded-2xl transition cursor-pointer flex items-center justify-center" title="Reset"><i class="fa-solid fa-rotate-left"></i></button>
+                </div>
             </div>
 
             <div class="bg-[#161224]/80 backdrop-blur-xl border border-slate-800/80 rounded-3xl p-5 space-y-4 text-left">
@@ -1816,12 +1973,17 @@
                         <button onclick="switchSongPlaylistTab('hindi')" id="song-tab-hindi" class="song-tab-btn flex-1 bg-[#0f0c1a] border border-slate-800 text-slate-300 text-[10px] font-bold py-2 rounded-xl transition cursor-pointer">हिंदी</button>
                     </div>
                     <div id="song-playlist-list" class="space-y-1.5"></div>
-                    <div id="song-player-wrap" class="hidden aspect-video w-full rounded-2xl overflow-hidden border border-slate-800 shadow-inner">
-                        <iframe id="song-player-iframe" class="w-full h-full" src="" title="Song player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                    <div id="song-player-wrap" class="hidden space-y-2">
+                        <div class="aspect-video w-full rounded-2xl overflow-hidden border border-slate-800 shadow-inner relative">
+                            <iframe id="song-player-iframe" class="w-full h-full" src="" title="Song player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                        </div>
+                        <button onclick="stopSongPlayer()" class="w-full bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white text-[10px] font-bold py-2 rounded-xl transition cursor-pointer"><i class="fa-solid fa-stop mr-1"></i> Stop</button>
+                        <p class="text-[9px] text-amber-400/80 leading-relaxed"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Getting a playback error here (e.g. "Error 153")? That means the video's owner has disabled it from playing on other websites — this can't be fixed on our end. Ask the admin to swap in a different video link that allows embedding.</p>
                     </div>
                     <p class="text-[9px] text-slate-600 leading-relaxed"><i class="fa-solid fa-circle-info mr-1"></i> Played through YouTube's own official player — these are links the admin has added, not files stored on this site.</p>
                 </div>
             </div>
+        </div>
         </div>
     </div>
 
@@ -1854,6 +2016,34 @@
     </footer>
 
     </div> <!-- /#page-shell -->
+
+    <!-- FAQ CHATBOT (rule-based, no external API — matches keywords against a built-in
+         O/L Maths + app-usage knowledge base. Safe to run in a public static file since
+         no API key is involved.) -->
+    <div id="chatbot-launcher-wrap" class="hidden fixed bottom-5 right-5 z-[85]">
+        <button onclick="toggleChatbot()" id="chatbot-launcher-btn" class="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-2xl flex items-center justify-center text-xl cursor-pointer transition shine-btn" title="Ask MoraBot">
+            <i class="fa-solid fa-comment-dots" id="chatbot-launcher-icon"></i>
+        </button>
+    </div>
+
+    <div id="chatbot-panel" class="hidden fixed bottom-24 right-5 z-[86] w-[92vw] max-w-sm h-[70vh] max-h-[520px] bg-[#161224] border border-slate-800 rounded-3xl shadow-2xl flex flex-col overflow-hidden pop-in">
+        <div class="px-4 py-3.5 border-b border-slate-800 bg-gradient-to-r from-indigo-600/20 to-purple-600/20 flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2.5 min-w-0">
+                <div class="w-8 h-8 rounded-xl bg-indigo-600/40 border border-indigo-500/50 text-yellow-300 flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-robot"></i></div>
+                <div class="min-w-0">
+                    <p class="text-xs font-extrabold text-white truncate" id="chatbot-title">MoraBot</p>
+                    <p class="text-[9px] text-slate-400 truncate" id="chatbot-subtitle">O/L Maths සහ App එකට උදව්වක්</p>
+                </div>
+            </div>
+            <button onclick="toggleChatbot()" class="w-7 h-7 rounded-lg bg-slate-900 text-slate-400 hover:text-white flex items-center justify-center text-xs cursor-pointer shrink-0"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div id="chatbot-messages" class="flex-1 overflow-y-auto p-3.5 space-y-2.5"></div>
+        <div id="chatbot-suggestions" class="px-3.5 pb-2 flex flex-wrap gap-1.5"></div>
+        <div class="p-3 border-t border-slate-800 flex items-center gap-2">
+            <input type="text" id="chatbot-input" placeholder="ප්‍රශ්නයක් type කරන්න…" class="flex-1 bg-[#0f0c1a] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 transition" onkeypress="if(event.key==='Enter') sendChatbotMessage();">
+            <button onclick="sendChatbotMessage()" class="bg-indigo-600 hover:bg-indigo-500 text-white w-9 h-9 rounded-xl transition cursor-pointer flex items-center justify-center shrink-0"><i class="fa-solid fa-paper-plane text-xs"></i></button>
+        </div>
+    </div>
 
     <!-- FOCUS MUSIC MINI-CONTROL (small play/pause mark, always reachable, tucked on the right edge so it never overlaps the nav or other content) -->
     <div id="focus-top-indicator" class="hidden fixed top-1/2 right-0 -translate-y-1/2 z-[95] bg-[#161224]/90 backdrop-blur-xl border border-indigo-500/50 border-r-0 rounded-l-full shadow-2xl pl-3 pr-1.5 py-1.5 flex items-center gap-2 cursor-pointer" onclick="openFocusMode()">
@@ -1950,6 +2140,8 @@
             if (data.goalsData) { goalsData = data.goalsData; localStorage.setItem('moramaths_goals_data', JSON.stringify(goalsData)); }
             if (data.pastPapersData) { pastPapersData = data.pastPapersData; localStorage.setItem('moramaths_pastpapers', JSON.stringify(pastPapersData)); }
             if (data.contactData) { contactData = data.contactData; localStorage.setItem('moramaths_contact', JSON.stringify(contactData)); }
+            const prevUnreadForMe = (typeof currentUser !== 'undefined' && currentUser && !isAdminUser(currentUser))
+                ? getUnreadAdminMessageCount(currentUser.username) : 0;
             if (data.studentMessages) { studentMessages = data.studentMessages; localStorage.setItem('moramaths_messages', JSON.stringify(studentMessages)); }
             if (data.songPlaylists) { songPlaylists = data.songPlaylists; localStorage.setItem('moramaths_songplaylists', JSON.stringify(songPlaylists)); }
             // Keep the logged-in user's own record (quiz scores, streak, game progress) fresh too,
@@ -1963,12 +2155,21 @@
                         localStorage.removeItem('moramaths_current_user');
                         if (appInitialized) {
                             initApp();
-                            showToast(currentLang === 'si' ? "ඔබගේ ගිණුම අත්හිටුවා ඇත." : "Your account has been suspended.", 'error');
+                            showBannedAccountMessage();
                         }
                         return;
                     }
                     currentUser = freshMe;
                     localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
+                }
+                // A brand-new admin message arrived (not just the same ones re-syncing) —
+                // surface it as a toast right away, on top of the sidebar badge, so the
+                // student notices even if they're not looking at Contact Us.
+                if (appInitialized && !isAdminUser(currentUser)) {
+                    const newUnread = getUnreadAdminMessageCount(currentUser.username);
+                    if (newUnread > prevUnreadForMe) {
+                        showToast(currentLang === 'si' ? "📩 Admin ගෙන් අලුත් පණිවිඩයක්!" : "📩 New message from Admin!", 'success');
+                    }
                 }
             }
             suppressCloudPush = false;
@@ -2006,6 +2207,7 @@
                     if (papersSec && !papersSec.classList.contains('hidden') && typeof renderPastPapersView === 'function') renderPastPapersView();
                     const contactSec = document.getElementById('contact-section');
                     if (contactSec && !contactSec.classList.contains('hidden') && typeof renderMessageThread === 'function') renderMessageThread();
+                    if (typeof renderContactUnreadBadge === 'function') renderContactUnreadBadge();
                 }
                 if (typeof renderNotifBell === 'function') renderNotifBell();
             }
@@ -2095,6 +2297,112 @@
             // Surface EmailJS's own error text directly (avoids needing devtools to debug).
             const detail = err && (err.text || err.message);
             return detail ? `${base}\n(${detail})` : base;
+        }
+
+        /* ============ BANNED ACCOUNT — CONTACT ADMIN MODAL ============
+           Replaces the old plain toast: a suspended student needs an actual way to
+           reach the admin, not just to be told to "contact admin" with no details. */
+        function showBannedAccountMessage() {
+            const wrap = document.getElementById('banned-modal-contacts');
+            const empty = document.getElementById('banned-modal-empty');
+            const rows = [];
+            if (contactData.whatsapp) rows.push(`<a href="${contactData.whatsapp}" target="_blank" class="flex items-center gap-3 bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-300 rounded-2xl px-4 py-3 transition"><i class="fa-brands fa-whatsapp text-lg"></i><span class="text-xs font-bold">WhatsApp</span></a>`);
+            if (contactData.telegram) rows.push(`<a href="${contactData.telegram}" target="_blank" class="flex items-center gap-3 bg-sky-600/15 hover:bg-sky-600/25 border border-sky-500/30 text-sky-300 rounded-2xl px-4 py-3 transition"><i class="fa-brands fa-telegram text-lg"></i><span class="text-xs font-bold">Telegram</span></a>`);
+            if (contactData.phone1) rows.push(`<a href="tel:${contactData.phone1.replace(/[^0-9+]/g, '')}" class="flex items-center gap-3 bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-300 rounded-2xl px-4 py-3 transition"><i class="fa-solid fa-phone text-lg"></i><span class="text-xs font-bold">${escapeHtml(contactData.phone1)}</span></a>`);
+            if (contactData.phone2) rows.push(`<a href="tel:${contactData.phone2.replace(/[^0-9+]/g, '')}" class="flex items-center gap-3 bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-300 rounded-2xl px-4 py-3 transition"><i class="fa-solid fa-phone text-lg"></i><span class="text-xs font-bold">${escapeHtml(contactData.phone2)}</span></a>`);
+            wrap.innerHTML = rows.join('');
+            empty.classList.toggle('hidden', rows.length > 0);
+            document.getElementById('banned-modal-title').innerText = currentLang === 'si' ? "ඔබගේ ගිණුම අත්හිටුවා ඇත" : "Your account has been suspended";
+            document.getElementById('banned-modal-desc').innerText = currentLang === 'si' ? "මෙය වැරදීමක් යැයි සිතන්නේ නම්, පහත ක්‍රමයකින් Admin අමතන්න:" : "If you think this is a mistake, reach the admin using one of the options below:";
+            document.getElementById('banned-modal').classList.remove('hidden');
+        }
+        function closeBannedModal() { document.getElementById('banned-modal').classList.add('hidden'); }
+
+        /* ============ FORGOT PASSWORD (OTP via email) ============ */
+        let tempResetData = null;
+
+        function openForgotPasswordModal() {
+            document.getElementById('fp-step-email').classList.remove('hidden');
+            document.getElementById('fp-step-reset').classList.add('hidden');
+            document.getElementById('fp-email-input').value = document.getElementById('login-id').value.includes('@') ? document.getElementById('login-id').value.trim() : '';
+            document.getElementById('forgot-password-modal').classList.remove('hidden');
+        }
+        function closeForgotPasswordModal() {
+            document.getElementById('forgot-password-modal').classList.add('hidden');
+            tempResetData = null;
+        }
+
+        function sendForgotPasswordOtp() {
+            if (formBusy) return;
+            const email = document.getElementById('fp-email-input').value.trim().toLowerCase();
+            if (!email) { showToast(currentLang === 'si' ? "Email එකක් ඇතුළත් කරන්න" : "Please enter your email", 'error'); return; }
+            const found = users.find(u => u.email.toLowerCase() === email);
+            if (!found) { showToast(currentLang === 'si' ? "මෙම Email එකට ගිණුමක් නැත" : "No account found with this email", 'error'); return; }
+            if (found.banned) { closeForgotPasswordModal(); showBannedAccountMessage(); return; }
+
+            const otpCode = generateOtpCode();
+            tempResetData = { email: found.email, username: found.username, otp: otpCode };
+
+            formBusy = true;
+            const btn = document.getElementById('fp-send-btn');
+            const original = btn.innerText;
+            btn.disabled = true;
+            btn.classList.add('opacity-60', 'cursor-not-allowed');
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1"></i> ${currentLang === 'si' ? 'එවමින්...' : 'Sending...'}`;
+
+            sendOtpEmail(found.email, toTitleCase(found.fullname), otpCode)
+                .then(() => {
+                    document.getElementById('fp-step-email').classList.add('hidden');
+                    document.getElementById('fp-step-reset').classList.remove('hidden');
+                    showToast(currentLang === 'si' ? "OTP එක Email එකට එවා ඇත!" : "OTP sent to your email!", 'success');
+                })
+                .catch(err => {
+                    console.error('Password reset OTP error:', err);
+                    tempResetData = null;
+                    showToast(getOtpFailureMessage(err), 'error');
+                })
+                .finally(() => {
+                    formBusy = false;
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-60', 'cursor-not-allowed');
+                    btn.innerText = original;
+                });
+        }
+
+        function resendForgotPasswordOtp() {
+            if (!tempResetData) { openForgotPasswordModal(); return; }
+            const otpCode = generateOtpCode();
+            tempResetData.otp = otpCode;
+            const found = users.find(u => u.username === tempResetData.username);
+            sendOtpEmail(tempResetData.email, found ? toTitleCase(found.fullname) : tempResetData.username, otpCode)
+                .then(() => showToast(currentLang === 'si' ? "OTP එක නැවත එවා ඇත!" : "OTP resent!", 'success'))
+                .catch(err => showToast(getOtpFailureMessage(err), 'error'));
+        }
+
+        function confirmPasswordReset() {
+            if (!tempResetData) { showToast("Session expired — please start again.", 'error'); openForgotPasswordModal(); return; }
+            const enteredOtp = document.getElementById('fp-otp-input').value.trim();
+            const newPass = document.getElementById('fp-newpass-input').value;
+            if (enteredOtp !== tempResetData.otp) {
+                showToast(currentLang === 'si' ? "වැරදි OTP අංකයකි!" : "Invalid OTP!", 'error');
+                return;
+            }
+            if (!newPass || newPass.length < 4) {
+                showToast(currentLang === 'si' ? "Password අවම වශයෙන් අකුරු 4ක් වත් තිබිය යුතුයි" : "Password must be at least 4 characters", 'error');
+                return;
+            }
+            const user = users.find(u => u.username === tempResetData.username);
+            if (!user) { showToast("Account not found", 'error'); return; }
+
+            sha256Hex(newPass).then(hash => {
+                user.password = hash;
+                localStorage.setItem('moramaths_users', JSON.stringify(users));
+                cloudPush();
+                showToast(currentLang === 'si' ? "Password එක වෙනස් කළා! දැන් login වෙන්න." : "Password reset! You can log in now.", 'success');
+                closeForgotPasswordModal();
+                document.getElementById('login-id').value = user.username;
+                document.getElementById('login-password').value = '';
+            });
         }
 
         const megaQuotesDataset = [
@@ -2241,20 +2549,30 @@
                 { q: "2,4,6,8,10 සංඛ්‍යා වල මධ්‍යනය (mean) කීයද?", options: ["5", "6", "7", "8"], correct: 1 },
                 { q: "3,5,7,9,11 සංඛ්‍යා වල මධ්‍යස්ථය (median) කීයද?", options: ["5", "7", "9", "6"], correct: 1 },
                 { q: "2,3,3,4,5,3 දත්ත කුලකයේ බහුලකය (mode) කුමක්ද?", options: ["2", "3", "4", "5"], correct: 1 }
-            ]},
-            { titleSi: "සංඛ්‍යා රටා අභියෝගය (IQ)", titleEn: "Number Pattern IQ Challenge", icon: "fa-brain", type: "numeric", questions: [
-                { q: "3, 7, 11, 15, ?", ans: 19, hint: "සමාන්තර ශ්‍රේණියක් (+4 එකතු වේ)" },
-                { q: "2, 6, 18, 54, ?", ans: 162, hint: "ගුණෝත්තර ශ්‍රේණියක් (x3 ගුණ වේ)" },
-                { q: "1, 4, 9, 16, 25, ?", ans: 36, hint: "වර්ග සංඛ්‍යා රටාව (1², 2², 3²...)" },
-                { q: "1, 3, 6, 10, 15, ?", ans: 21, hint: "ත්‍රිකෝණ සංඛ්‍යා රටාව" },
-                { q: "0, 1, 1, 2, 3, 5, ?", ans: 8, hint: "ෆිබොනාචි රටාව (කලින් සංඛ්‍යා 2හි එකතුව)" },
-                { q: "2, 3, 5, 7, 11, 13, ?", ans: 17, hint: "ප්‍රථමක සංඛ්‍යා රටාව" },
-                { q: "1, 8, 27, 64, ?", ans: 125, hint: "ඝන සංඛ්‍යා රටාව (1³, 2³, 3³...)" },
-                { q: "100, 95, 85, 70, ?", ans: 50, hint: "වෙනස අනුක්‍රමයෙන් වැඩි වන රටාව (-5,-10,-15,-20)" },
-                { q: "2, 5, 10, 17, 26, ?", ans: 37, hint: "(n² + 1) රටාව" },
-                { q: "3, 5, 9, 17, 33, ?", ans: 65, hint: "(x2 - 1) රටාව" }
             ]}
         ];
+
+        /* ============ BONUS CHALLENGE (standalone second game — separate from the 16-level
+           syllabus game above, its own entry point, its own best-score, no unlock chain).
+           Harder than a normal level: more questions, tougher/2-step patterns. */
+        const bonusChallengeGame = { titleSi: "සංඛ්‍යා රටා අභියෝගය (IQ)", titleEn: "Number Pattern IQ Challenge", icon: "fa-brain", type: "numeric", questions: [
+            { q: "3, 7, 11, 15, ?", ans: 19, hint: "සමාන්තර ශ්‍රේණියක් (+4 එකතු වේ)" },
+            { q: "2, 6, 18, 54, ?", ans: 162, hint: "ගුණෝත්තර ශ්‍රේණියක් (x3 ගුණ වේ)" },
+            { q: "1, 4, 9, 16, 25, ?", ans: 36, hint: "වර්ග සංඛ්‍යා රටාව (1², 2², 3²...)" },
+            { q: "1, 3, 6, 10, 15, ?", ans: 21, hint: "ත්‍රිකෝණ සංඛ්‍යා රටාව" },
+            { q: "0, 1, 1, 2, 3, 5, ?", ans: 8, hint: "ෆිබොනාචි රටාව (කලින් සංඛ්‍යා 2හි එකතුව)" },
+            { q: "2, 3, 5, 7, 11, 13, ?", ans: 17, hint: "ප්‍රථමක සංඛ්‍යා රටාව" },
+            { q: "1, 8, 27, 64, ?", ans: 125, hint: "ඝන සංඛ්‍යා රටාව (1³, 2³, 3³...)" },
+            { q: "100, 95, 85, 70, ?", ans: 50, hint: "වෙනස අනුක්‍රමයෙන් වැඩි වන රටාව (-5,-10,-15,-20)" },
+            { q: "2, 5, 10, 17, 26, ?", ans: 37, hint: "(n² + 1) රටාව" },
+            { q: "3, 5, 9, 17, 33, ?", ans: 65, hint: "(x2 - 1) රටාව" },
+            { q: "1, 2, 6, 24, 120, ?", ans: 720, hint: "ගුණාකාරය (factorial): n! රටාව (×2, ×3, ×4, ×5, ×6)" },
+            { q: "2, 3, 7, 16, 32, ?", ans: 57, hint: "දෙවන අනුපිළිවෙල: වෙනස්කම් 1,4,9,16,25 (වර්ග අනුව වැඩි වේ)" },
+            { q: "4, 9, 19, 39, 79, ?", ans: 159, hint: "ඊළඟ පදය = (කලින් පදය × 2) + 1" },
+            { q: "5, 11, 23, 47, 95, ?", ans: 191, hint: "ඊළඟ පදය = (කලින් පදය × 2) + 1" },
+            { q: "1, 1, 2, 3, 5, 8, 13, ?", ans: 21, hint: "ෆිබොනාචි රටාව දිගටම (කලින් පද 2ක එකතුව)" },
+            { q: "2, 4, 12, 48, 240, ?", ans: 1440, hint: "×2, ×3, ×4, ×5, ×6 — ගුණකය එකින් එක වැඩි වේ" }
+        ]};
 
         const megaDictionaryData = {
             "math_terms": [
@@ -2323,7 +2641,7 @@
                 leaderboardBack: "ආපසු",
                 leaderboardEmpty: "තවම කිසිවෙකු Quiz එකක් කර නැත — පළමු වන්න!",
                 gameBtn: "ක්‍රීඩාව",
-                gameTitle: "O/L ගණිත මට්ටම් ක්‍රීඩාව — මට්ටම් 17ක්",
+                gameTitle: "O/L ගණිත මට්ටම් ක්‍රීඩාව — මට්ටම් 16ක්",
                 gameSub: "සිංහල මාධ්‍යයෙන් O/L ගණිත විෂය නිර්දේශයට අනුව සකසන ලද මට්ටම් 16ක ක්‍රීඩාවකි. එක් එක් මට්ටම සමත් වී ඊළඟ මට්ටම අගුළු හරින්න!",
                 gameBack: "ආපසු",
                 notifTitle: "දැනුම්දීම්",
@@ -2387,7 +2705,7 @@
                 leaderboardBack: "Back",
                 leaderboardEmpty: "No quiz attempts yet — be the first!",
                 gameBtn: "Level Game",
-                gameTitle: "O/L Maths Level Game — 17 Levels",
+                gameTitle: "O/L Maths Level Game — 16 Levels",
                 gameSub: "A 16-level game built to match the O/L Mathematics syllabus. Pass each level to unlock the next!",
                 gameBack: "Back",
                 notifTitle: "Notifications",
@@ -2483,8 +2801,107 @@
                 .replace(/'/g, '&#39;');
         }
 
+        /* ============ SECURITY: password hashing ============
+           Passwords are hashed with SHA-256 (Web Crypto) before ever being
+           saved to localStorage/Firestore, instead of stored as plain text.
+           looksHashed() lets old accounts created before this update (plain
+           text) keep working — they're transparently upgraded to a hash the
+           next time that student logs in successfully. */
+        async function sha256Hex(str) {
+            if (!window.crypto || !window.crypto.subtle) return str; // insecure context (e.g. file://) — no hashing available, falls back to plain text
+            const enc = new TextEncoder().encode(str);
+            const buf = await crypto.subtle.digest('SHA-256', enc);
+            return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+        function looksHashed(pw) { return typeof pw === 'string' && /^[a-f0-9]{64}$/i.test(pw); }
+
         function isAdminUser(u) { return !!u && (u.role === 'admin' || u.role === 'master_admin'); }
         function isMasterAdmin(u) { return !!u && u.role === 'master_admin'; }
+
+        /* ============ PAID ACCESS CONTROL ============
+           Speed Revision lesson content and the live Zoom class link are gated
+           behind a subscription. Admins/master admin always have access; a
+           student needs u.paidUntil to be today or a future date. */
+        function hasActiveAccess(u) {
+            if (!u) return false;
+            if (isAdminUser(u)) return true;
+            if (!u.paidUntil) return false;
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const until = new Date(u.paidUntil + 'T23:59:59');
+            return until >= today;
+        }
+
+        function daysUntil(dateStr) {
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const until = new Date(dateStr + 'T00:00:00');
+            return Math.round((until - today) / 86400000);
+        }
+
+        let accessModalUsername = null;
+
+        function openAccessModal(username) {
+            const u = users.find(x => x.username === username);
+            if (!u) return;
+            accessModalUsername = username;
+            document.getElementById('access-modal-student-name').innerText = toTitleCase(u.fullname) + ' · @' + u.username;
+            const statusEl = document.getElementById('access-modal-current-status');
+            if (hasActiveAccess(u)) {
+                const d = daysUntil(u.paidUntil);
+                statusEl.innerHTML = `<span class="text-emerald-400 font-bold"><i class="fa-solid fa-circle-check mr-1"></i> Active</span> — valid until <b>${u.paidUntil}</b> (${d} day${d === 1 ? '' : 's'} left)`;
+            } else if (u.paidUntil) {
+                statusEl.innerHTML = `<span class="text-rose-400 font-bold"><i class="fa-solid fa-circle-xmark mr-1"></i> Expired</span> — was valid until <b>${u.paidUntil}</b>`;
+            } else {
+                statusEl.innerHTML = `<span class="text-slate-500 font-bold"><i class="fa-solid fa-circle-minus mr-1"></i> No subscription set</span>`;
+            }
+            document.getElementById('access-modal-date-input').value = u.paidUntil || '';
+            document.getElementById('access-modal').classList.remove('hidden');
+        }
+
+        function closeAccessModal() {
+            document.getElementById('access-modal').classList.add('hidden');
+            accessModalUsername = null;
+        }
+
+        function setAccessQuickPreset(months) {
+            const base = new Date();
+            base.setMonth(base.getMonth() + months);
+            document.getElementById('access-modal-date-input').value = base.toISOString().slice(0, 10);
+        }
+
+        function saveAccessModal() {
+            const u = users.find(x => x.username === accessModalUsername);
+            if (!u) return;
+            const val = document.getElementById('access-modal-date-input').value;
+            if (!val) { showToast('Pick a date first', 'error'); return; }
+            u.paidUntil = val;
+            localStorage.setItem('moramaths_users', JSON.stringify(users));
+            cloudPush();
+            if (currentUser && currentUser.username === u.username) {
+                currentUser.paidUntil = val;
+                localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
+                setupStudentDashboard();
+            }
+            renderAdminUsersList();
+            closeAccessModal();
+            showToast(`${toTitleCase(u.fullname)}'s access set until ${val}`, 'success');
+        }
+
+        function revokeAccessModal() {
+            const u = users.find(x => x.username === accessModalUsername);
+            if (!u) return;
+            if (!confirm(`Revoke access for ${toTitleCase(u.fullname)}?`)) return;
+            u.paidUntil = null;
+            localStorage.setItem('moramaths_users', JSON.stringify(users));
+            cloudPush();
+            if (currentUser && currentUser.username === u.username) {
+                currentUser.paidUntil = null;
+                localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
+                setupStudentDashboard();
+            }
+            renderAdminUsersList();
+            closeAccessModal();
+            showToast(`${toTitleCase(u.fullname)}'s access revoked`, 'info');
+        }
 
         let siteAssets = JSON.parse(localStorage.getItem('moramaths_site_assets')) || { heroImage: '', dashboardBanner: '' };
 
@@ -2495,7 +2912,7 @@
         let progressGraphConfig = JSON.parse(localStorage.getItem('moramaths_progress_config')) || { scope: 'all' };
         let goalsData = JSON.parse(localStorage.getItem('moramaths_goals_data')) || { revisionMetric: 'quizzes', papersMetric: 'quizzes' };
         let pastPapersData = JSON.parse(localStorage.getItem('moramaths_pastpapers')) || [];
-        let contactData = JSON.parse(localStorage.getItem('moramaths_contact')) || { whatsapp: '', telegram: '' };
+        let contactData = JSON.parse(localStorage.getItem('moramaths_contact')) || { whatsapp: '', telegram: '', phone1: '', phone2: '' };
         let studentMessages = JSON.parse(localStorage.getItem('moramaths_messages')) || {};
         let songPlaylists = JSON.parse(localStorage.getItem('moramaths_songplaylists')) || { english: [], sinhala: [], hindi: [] };
 
@@ -2682,8 +3099,15 @@
             if (!goalsData || typeof goalsData !== 'object') goalsData = { revisionMetric: 'quizzes', papersMetric: 'quizzes' };
             if (!goalsData.revisionMetric) goalsData.revisionMetric = 'quizzes';
             if (!goalsData.papersMetric) goalsData.papersMetric = 'quizzes';
-            if (!contactData || typeof contactData !== 'object') contactData = { whatsapp: '', telegram: '' };
+            if (!contactData || typeof contactData !== 'object') contactData = { whatsapp: '', telegram: '', phone1: '', phone2: '' };
+            if (contactData.phone1 === undefined) contactData.phone1 = '';
+            if (contactData.phone2 === undefined) contactData.phone2 = '';
             if (!studentMessages || typeof studentMessages !== 'object') studentMessages = {};
+            Object.keys(studentMessages).forEach(uname => {
+                (studentMessages[uname] || []).forEach(m => {
+                    if (m.from === 'admin' && m.readByStudent === undefined) m.readByStudent = true; // pre-existing messages: treat as already seen
+                });
+            });
             if (!songPlaylists || typeof songPlaylists !== 'object') songPlaylists = { english: [], sinhala: [], hindi: [] };
             ['english', 'sinhala', 'hindi'].forEach(k => { if (!Array.isArray(songPlaylists[k])) songPlaylists[k] = []; });
             if (currentUser && !currentUser.quizScores) currentUser.quizScores = {};
@@ -2719,6 +3143,8 @@
                 if (isAdminUser(currentUser)) {
                     document.getElementById('admin-panel').classList.remove('hidden');
                     document.getElementById('student-dashboard').classList.add('hidden');
+                    document.getElementById('chatbot-launcher-wrap').classList.add('hidden');
+                    document.getElementById('chatbot-panel').classList.add('hidden');
                     loadAdminZoomForm();
                     renderAdminWeeksManager();
                     populateQuizWeekSelect();
@@ -2738,6 +3164,7 @@
                     document.getElementById('admin-panel').classList.add('hidden');
                     setupStudentDashboard();
                     renderChart();
+                    document.getElementById('chatbot-launcher-wrap').classList.remove('hidden');
                 }
                 document.getElementById('user-nav-profile').classList.remove('hidden');
                 document.getElementById('nav-user-name').innerText = toTitleCase(currentUser.fullname);
@@ -2751,6 +3178,8 @@
                 document.getElementById('admin-panel').classList.add('hidden');
                 document.getElementById('user-nav-profile').classList.add('hidden');
                 document.getElementById('notif-bell-wrap').classList.add('hidden');
+                document.getElementById('chatbot-launcher-wrap').classList.add('hidden');
+                document.getElementById('chatbot-panel').classList.add('hidden');
                 document.getElementById('app-sidebar').style.display = 'none';
                 document.getElementById('nav-hamburger-wrap').classList.add('hidden');
                 document.getElementById('page-shell').classList.remove('lg:pl-64');
@@ -2822,26 +3251,74 @@
             tempRegData = null;
         }
 
-        function handleLogin(e) {
+        let loginAttempts = {}; // { id: { count, lockedUntil } } — lightweight client-side brute-force deterrent
+
+        async function handleLogin(e) {
             e.preventDefault();
             if (formBusy) return;
             const id = document.getElementById('login-id').value.trim().toLowerCase();
             const pass = document.getElementById('login-password').value.trim();
+            if (!id || !pass) return;
 
-            const found = users.find(u => (u.username.toLowerCase() === id || u.email.toLowerCase() === id) && u.password === pass);
-            if (!found) {
-                showToast(currentLang === 'si' ? "වැරදි Username එකක් හෝ Password එකක්!" : "Invalid Username or Password!", 'error');
-                return;
-            }
-            if (found.banned) {
-                showToast(currentLang === 'si' ? "ඔබගේ ගිණුම අත්හිටුවා ඇත. Admin අමතන්න." : "Your account has been suspended. Please contact the admin.", 'error');
+            const attempt = loginAttempts[id];
+            if (attempt && attempt.lockedUntil && Date.now() < attempt.lockedUntil) {
+                const secsLeft = Math.ceil((attempt.lockedUntil - Date.now()) / 1000);
+                showToast(currentLang === 'si' ? `බොහෝ වැරදි උත්සාහයන්. තත්පර ${secsLeft}කින් නැවත උත්සාහ කරන්න.` : `Too many failed attempts. Try again in ${secsLeft}s.`, 'error');
                 return;
             }
 
-            currentUser = found;
-            localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
-            showToast(currentLang === 'si' ? `සාදරයෙන් පිළිගනිමු, ${toTitleCase(currentUser.fullname)}!` : `Welcome back, ${toTitleCase(currentUser.fullname)}!`, 'success');
-            initApp();
+            formBusy = true;
+            const loginBtn = document.getElementById('btn-login-submit');
+            const originalLoginLabel = loginBtn ? loginBtn.innerText : '';
+            if (loginBtn) {
+                loginBtn.disabled = true;
+                loginBtn.classList.add('opacity-60', 'cursor-not-allowed');
+                loginBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1"></i> ${currentLang === 'si' ? 'පිවිසෙමින්...' : 'Logging in...'}`;
+            }
+
+            try {
+                const found = users.find(u => (u.username.toLowerCase() === id || u.email.toLowerCase() === id));
+                let valid = false;
+                if (found) {
+                    if (looksHashed(found.password)) {
+                        valid = (await sha256Hex(pass)) === found.password;
+                    } else {
+                        // Legacy plain-text account (created before the security update) —
+                        // still honoured, then silently upgraded to a hash on success.
+                        valid = found.password === pass;
+                        if (valid) {
+                            found.password = await sha256Hex(pass);
+                            localStorage.setItem('moramaths_users', JSON.stringify(users));
+                            cloudPush();
+                        }
+                    }
+                }
+
+                if (!valid) {
+                    const prevCount = (loginAttempts[id]?.count || 0) + 1;
+                    loginAttempts[id] = { count: prevCount, lockedUntil: prevCount >= 5 ? Date.now() + 30000 : null };
+                    showToast(currentLang === 'si' ? "වැරදි Username එකක් හෝ Password එකක්!" : "Invalid Username or Password!", 'error');
+                    return;
+                }
+                delete loginAttempts[id];
+
+                if (found.banned) {
+                    showBannedAccountMessage();
+                    return;
+                }
+
+                currentUser = found;
+                localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
+                showToast(currentLang === 'si' ? `සාදරයෙන් පිළිගනිමු, ${toTitleCase(currentUser.fullname)}!` : `Welcome back, ${toTitleCase(currentUser.fullname)}!`, 'success');
+                initApp();
+            } finally {
+                formBusy = false;
+                if (loginBtn) {
+                    loginBtn.disabled = false;
+                    loginBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+                    loginBtn.innerText = originalLoginLabel;
+                }
+            }
         }
 
         function handleRegister(e) {
@@ -2862,7 +3339,7 @@
                 return;
             }
 
-            tempRegData = { fullname, email, username, password, quizScores: {} };
+            tempRegData = { fullname, email, username, password, quizScores: {}, paidUntil: null };
             const otpCode = generateOtpCode();
             tempRegData.otp = otpCode;
 
@@ -2903,13 +3380,14 @@
             }
         }
 
-        function verifyAndRegister() {
+        async function verifyAndRegister() {
             if (otpBusy) return;
             const enteredOtp = document.getElementById('otp-input').value.trim();
 
             if (!tempRegData) { closeOtpModal(); return; }
             if (enteredOtp === tempRegData.otp) {
                 const { otp, ...userRecord } = tempRegData;
+                userRecord.password = await sha256Hex(userRecord.password);
                 users.push(userRecord);
                 localStorage.setItem('moramaths_users', JSON.stringify(users));
                 cloudPush();
@@ -2936,18 +3414,31 @@
 
         function setupStudentDashboard() {
             const t = translations[currentLang];
+            renderContactUnreadBadge();
             const formattedName = toTitleCase(currentUser.fullname);
             document.getElementById('welcome-student-name').innerText = (currentLang === 'si' ? "ආයුබෝවන්, " : "Welcome, ") + formattedName + "!";
             document.getElementById('student-avatar').innerText = formattedName.charAt(0).toUpperCase();
             
-            document.getElementById('student-zoom-box').innerHTML = `
-                <div class="flex items-center justify-between mb-2">
-                    <span class="text-[11px] font-extrabold text-indigo-300 flex items-center gap-1.5"><i class="fa-solid fa-video text-rose-400 animate-pulse"></i> ${t.zoomTitle}</span>
-                    <span class="text-[9px] bg-emerald-500/20 text-emerald-400 px-2.5 py-0.5 rounded-full font-bold whitespace-nowrap">Active</span>
-                </div>
-                <p class="text-xs font-bold text-white mb-3 truncate">ID: ${zoomData.id} | Pass: ${zoomData.pass}</p>
-                <a href="${zoomData.link}" target="_blank" class="block text-center bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-lg">${t.zoomJoin}</a>
-            `;
+            if (hasActiveAccess(currentUser)) {
+                document.getElementById('student-zoom-box').innerHTML = `
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-[11px] font-extrabold text-indigo-300 flex items-center gap-1.5"><i class="fa-solid fa-video text-rose-400 animate-pulse"></i> ${t.zoomTitle}</span>
+                        <span class="text-[9px] bg-emerald-500/20 text-emerald-400 px-2.5 py-0.5 rounded-full font-bold whitespace-nowrap">Active</span>
+                    </div>
+                    <p class="text-xs font-bold text-white mb-3 truncate">ID: ${zoomData.id} | Pass: ${zoomData.pass}</p>
+                    <a href="${zoomData.link}" target="_blank" class="block text-center bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-lg">${t.zoomJoin}</a>
+                `;
+            } else {
+                const isSi = currentLang === 'si';
+                document.getElementById('student-zoom-box').innerHTML = `
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-[11px] font-extrabold text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-lock text-amber-400"></i> ${t.zoomTitle}</span>
+                        <span class="text-[9px] bg-amber-500/15 text-amber-300 px-2.5 py-0.5 rounded-full font-bold whitespace-nowrap">${isSi ? 'Subscription' : 'Subscription'}</span>
+                    </div>
+                    <p class="text-xs text-slate-400 mb-3 leading-relaxed">${isSi ? 'Live Zoom පන්තියට සහ Speed Revision පාඩම් වලට පිවිසීමට ඔබේ subscription එක සක්‍රිය කරගත යුතුයි. Admin ට පණිවිඩයක් එවන්න.' : 'Your subscription needs to be activated to join live Zoom classes and open Speed Revision lessons. Message the admin to get access.'}</p>
+                    <button onclick="sidebarAction('contact')" class="block w-full text-center bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white text-xs font-bold py-2.5 rounded-xl transition shadow-lg cursor-pointer">${isSi ? 'Admin අමතන්න' : 'Contact Admin'}</button>
+                `;
+            }
             updateStudyStreak();
             renderGoals();
         }
@@ -3209,6 +3700,17 @@
             const frame = document.getElementById('lesson-code-frame');
             const empty = document.getElementById('lesson-code-empty');
             const emptyText = document.getElementById('lesson-code-empty-text');
+            if (currentUser && !isAdminUser(currentUser) && !hasActiveAccess(currentUser)) {
+                frame.srcdoc = '';
+                frame.classList.add('hidden');
+                empty.classList.remove('hidden');
+                empty.classList.add('flex');
+                if (emptyText) emptyText.innerHTML = currentLang === 'si'
+                    ? '<i class="fa-solid fa-lock text-amber-400 mb-2 block text-2xl"></i>මෙම පාඩම බැලීමට ඔබේ subscription එක සක්‍රිය කරගත යුතුයි. Admin ට පණිවිඩයක් එවන්න.'
+                    : '<i class="fa-solid fa-lock text-amber-400 mb-2 block text-2xl"></i>Your subscription needs to be active to view this lesson. Message the admin to get access.';
+                document.getElementById('lesson-code-modal').classList.remove('hidden');
+                return;
+            }
             if (emptyText) emptyText.innerText = currentLang === 'si' ? 'මෙම පාඩම සඳහා UI/Code එකක් තවම ඇතුළත් කර නොමැත.' : 'No HTML/UI code added for this lesson yet.';
             if (lesson.lessonCode && lesson.lessonCode.trim() !== '') {
                 // Rendered inside a sandboxed iframe (via srcdoc) rather than innerHTML —
@@ -3355,10 +3857,33 @@
             });
         }
 
+        /* ============ GOOGLE DRIVE LINK HELPER ============
+           Two common admin mistakes cause "the whole Drive shows up" complaints:
+           1. Pasting a FOLDER link (drive.google.com/drive/folders/...) instead of a
+              single file's share link — that genuinely opens the whole folder.
+           2. Pasting a file's "view" link as-is — it works, but Drive's UI around it
+              can show a file switcher/back button that feels like "other files show".
+           This normalizes file links to the cleaner, single-file /preview embed URL,
+           and warns (without blocking) if a folder link looks like it was pasted. */
+        function processPdfLink(url) {
+            if (!url || url === '#') return url;
+            if (/drive\.google\.com\/drive\/folders\//.test(url) || /drive\.google\.com\/drive\/u\/\d+\/folders\//.test(url)) {
+                showToast(currentLang === 'si'
+                    ? "⚠️ මේක Google Drive FOLDER link එකක් — student ට folder එකේ files ඔක්කොම පේනවා! තනි file එකේ 'Share' → 'Copy link' එකෙන් ලැබෙන link එක දාන්න."
+                    : "⚠️ This looks like a Google Drive FOLDER link — students will see every file in it. Open the single file itself, then use its own Share → Copy link.", 'error');
+                return url;
+            }
+            const fileMatch = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+            if (fileMatch) {
+                return `https://drive.google.com/file/d/${fileMatch[1]}/preview`;
+            }
+            return url;
+        }
+
         function addLessonToWeek() {
             const weekIndex = document.getElementById('admin-target-week').value;
             const title = document.getElementById('admin-lesson-title').value.trim();
-            const pdf = document.getElementById('admin-pdf-link').value.trim() || "#";
+            const pdf = processPdfLink(document.getElementById('admin-pdf-link').value.trim() || "#");
             const activity = document.getElementById('admin-activity-link').value.trim() || "#";
             const lessonCode = document.getElementById('admin-lesson-code').value.trim();
             if (!title) { showToast("Please enter a lesson title", 'error'); return; }
@@ -3870,27 +4395,63 @@
             else { wa.classList.add('hidden'); if (waEmpty) waEmpty.classList.remove('hidden'); }
             if (contactData.telegram) { tg.href = contactData.telegram; tg.classList.remove('hidden'); if (tgEmpty) tgEmpty.classList.add('hidden'); }
             else { tg.classList.add('hidden'); if (tgEmpty) tgEmpty.classList.remove('hidden'); }
+            renderContactPhoneSlot(1);
+            renderContactPhoneSlot(2);
             renderMessageThread();
+        }
+
+        // Shows a phone contact card only if that slot has actually been filled in by the admin.
+        function renderContactPhoneSlot(n) {
+            const link = document.getElementById(`contact-phone${n}-link`);
+            const numEl = document.getElementById(`contact-phone${n}-number`);
+            const num = contactData[`phone${n}`];
+            if (!link) return;
+            if (num) {
+                link.href = 'tel:' + num.replace(/[^0-9+]/g, '');
+                if (numEl) numEl.innerText = num;
+                link.classList.remove('hidden');
+            } else {
+                link.classList.add('hidden');
+            }
         }
 
         function loadAdminContactForm() {
             const wa = document.getElementById('admin-contact-whatsapp');
             const tg = document.getElementById('admin-contact-telegram');
+            const p1 = document.getElementById('admin-contact-phone1');
+            const p2 = document.getElementById('admin-contact-phone2');
             if (wa) wa.value = contactData.whatsapp || '';
             if (tg) tg.value = contactData.telegram || '';
+            if (p1) p1.value = contactData.phone1 || '';
+            if (p2) p2.value = contactData.phone2 || '';
         }
 
         function saveContactData() {
             if (!isMasterAdmin(currentUser)) return;
             const wa = document.getElementById('admin-contact-whatsapp').value.trim();
             const tg = document.getElementById('admin-contact-telegram').value.trim();
-            contactData = { whatsapp: wa, telegram: tg };
+            const p1 = document.getElementById('admin-contact-phone1').value.trim();
+            const p2 = document.getElementById('admin-contact-phone2').value.trim();
+            contactData = { whatsapp: wa, telegram: tg, phone1: p1, phone2: p2 };
             localStorage.setItem('moramaths_contact', JSON.stringify(contactData));
             cloudPush();
             showToast("Contact Us links updated!", 'success');
         }
 
         /* ============ MESSAGING (private student <-> admin threads) ============ */
+        function getUnreadAdminMessageCount(username) {
+            const thread = studentMessages[username] || [];
+            return thread.filter(m => m.from === 'admin' && !m.readByStudent).length;
+        }
+
+        function renderContactUnreadBadge() {
+            const badge = document.getElementById('sidebar-contact-unread-badge');
+            if (!badge || !currentUser || isAdminUser(currentUser)) return;
+            const count = getUnreadAdminMessageCount(currentUser.username);
+            badge.innerText = count > 9 ? '9+' : count;
+            badge.classList.toggle('hidden', count === 0);
+        }
+
         function renderMessageThread() {
             const wrap = document.getElementById('my-message-thread');
             if (!wrap || !currentUser || isAdminUser(currentUser)) return;
@@ -3908,6 +4469,15 @@
                 `).join('');
             }
             wrap.scrollTop = wrap.scrollHeight;
+            // Opening this thread means the student has now seen any admin replies —
+            // clear the unread badge on the sidebar and persist that they're read.
+            const hadUnread = thread.some(m => m.from === 'admin' && !m.readByStudent);
+            if (hadUnread) {
+                thread.forEach(m => { if (m.from === 'admin') m.readByStudent = true; });
+                localStorage.setItem('moramaths_messages', JSON.stringify(studentMessages));
+                cloudPush();
+            }
+            renderContactUnreadBadge();
         }
 
         function sendMessageToAdmin() {
@@ -3926,6 +4496,15 @@
 
         /* ============ ADMIN: MESSAGES INBOX (each thread private to that one student) ============ */
         let viewedMessageThreadUsername = null;
+
+        function startMessageWithStudent(username) {
+            if (!studentMessages[username]) studentMessages[username] = [];
+            openAdminMessageThread(username);
+            const wrap = document.getElementById('admin-message-thread-wrap');
+            if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const input = document.getElementById('admin-message-reply-input');
+            if (input) setTimeout(() => input.focus(), 350);
+        }
 
         function renderAdminMessagesInbox() {
             const wrap = document.getElementById('admin-messages-inbox');
@@ -3975,11 +4554,167 @@
             const text = input.value.trim();
             if (!text) return;
             if (!studentMessages[viewedMessageThreadUsername]) studentMessages[viewedMessageThreadUsername] = [];
-            studentMessages[viewedMessageThreadUsername].push({ id: uid(), from: 'admin', text, date: Date.now() });
+            studentMessages[viewedMessageThreadUsername].push({ id: uid(), from: 'admin', text, date: Date.now(), readByStudent: false });
             localStorage.setItem('moramaths_messages', JSON.stringify(studentMessages));
             cloudPush();
             input.value = '';
             openAdminMessageThread(viewedMessageThreadUsername);
+        }
+
+        /* ============ MoraBot — RULE-BASED FAQ CHATBOT ============
+           No external AI/API is used here on purpose: this file is a public static page
+           hosted on Netlify, so any real API key baked into it could be read straight out
+           of the page source and abused by anyone. Instead this matches the student's
+           message against a small built-in knowledge base (app usage + O/L Maths basics)
+           by keyword overlap — 100% free, works offline, nothing to leak. */
+        const chatbotKB = [
+            { keywords: ['quiz', 'test', 'ප්‍රශ්න', 'පරික්ෂණ', 'ටෙස්ට්', 'quiz eka', 'quiz karanne'],
+              answer: 'Quiz එකක් කරන්න: Dashboard එකේ Week card එකක් click කරලා, ඇතුළේ තියෙන lesson එකේ 🟢 Quiz button එක click කරන්න.' },
+            { keywords: ['lesson', 'පාඩම', 'video', 'lesson balanne', 'watch lesson'],
+              answer: 'Lesson එකක් බලන්න: Week card එකේ ඇතුළේ තියෙන lesson එකේ නම click කරන්න — interactive lesson viewer එක open වෙනවා.' },
+            { keywords: ['progress', 'chart', 'ප්‍රගතිය', 'ලකුණු', 'marks', 'score'],
+              answer: 'ඔයාගේ ලකුණු ප්‍රගතිය Dashboard එකේ Progress Graph එකේ පේනවා — ඒක හදන්නේ ඔයා දැනටමත් කරපු Quiz වල real ලකුණු වලින්.' },
+            { keywords: ['leaderboard', 'ranking', 'ලීඩර්බෝඩ්', 'rank', 'first place'],
+              answer: 'Leaderboard එක Sidebar එකේ 🏆 Leaderboard link එකෙන් බලන්න පුළුවන් — top scorers list වෙනවා.' },
+            { keywords: ['game', 'level', 'ක්‍රීඩාව', 'gaming hub', 'levels'],
+              answer: 'Level Game එකේ O/L Syllabus එකට match වෙන Level 16ක් තියෙනවා — Sidebar එකේ 🎮 Level Game එකෙන් යන්න. එක Level එකක් pass වුනාම ඊළඟ එක unlock වෙනවා.' },
+            { keywords: ['focus', 'timer', 'study music', 'පොමෝඩෝරෝ', 'concentration', 'study'],
+              answer: 'Focus Mode එකේ Pomodoro Timer එකකුත් (25/45/60 min), study music/ambient sounds එකකුත් තියෙනවා — Sidebar එකේ 🧠 Focus Mode.' },
+            { keywords: ['zoom', 'class', 'පන්තිය', 'live class', 'online class'],
+              answer: 'Live Zoom class එකට join වෙන්න Dashboard එකේ "සජීවී පන්තියට එකතු වන්න" button එක click කරන්න.' },
+            { keywords: ['password', 'reset password', 'මුරපදය', 'forgot password', 'login problem'],
+              answer: 'Password අමතක උනොත් Login screen එකේ "Forgot Password" click කරලා ඔයාගේ email එකට OTP එකක් ගන්න පුළුවන්.' },
+            { keywords: ['contact', 'admin', 'help', 'උදව්', 'teacher', 'sir', 'miss'],
+              answer: 'Admin ට කෙලින්ම message එකක් යවන්න Sidebar එකේ 📞 Contact Us වලට ගිහින් පණිවිඩයක් type කරන්න — Admin reply කරාම ඔයාට notification එකක් එනවා.' },
+            { keywords: ['past paper', 'පසුගිය ප්‍රශ්න පත්‍ර', 'model paper', 'exam paper'],
+              answer: 'Past Papers Sidebar එකේ 📄 Past Papers වලින් බලන්න පුළුවන්.' },
+            { keywords: ['pdf', 'download', 'බාගත', 'worksheet'],
+              answer: 'PDF එකක් download කරන්න lesson එකට යටින් තියෙන 📄 PDF button එක click කරන්න.' },
+            { keywords: ['pythagoras', 'පයිතගරස්'],
+              answer: 'පයිතගරස් ප්‍රමේයය: a² + b² = c² (c = කර්ණය). සෘජුකෝණී ත්‍රිකෝණයකට විතරයි අදාළ වෙන්නේ.' },
+            { keywords: ['circle area', 'වෘත්තයේ වර්ගඵලය', 'area of circle'],
+              answer: 'වෘත්තයක වර්ගඵලය = πr² (r = අරය). වට ප්‍රමාණය = 2πr.' },
+            { keywords: ['rectangle area', 'සෘජාස්‍රයේ වර්ගඵලය', 'area of rectangle'],
+              answer: 'සෘජාස්‍රයක වර්ගඵලය = දිග × පළල.' },
+            { keywords: ['percentage', 'ප්‍රතිශතය', '%'],
+              answer: 'ප්‍රතිශතය = (කොටස ÷ මුළු එකතුව) × 100' },
+            { keywords: ['simple interest', 'සරල පොලිය', 'interest formula'],
+              answer: 'සරල පොලී සූත්‍රය: I = PRT/100 (P=මුල් මුදල, R=පොලී අනුපාතය, T=කාලය)' },
+            { keywords: ['quadratic', 'ද්විඝාත සමීකරණය', 'quadratic formula'],
+              answer: 'ද්විඝාත සූත්‍රය: x = [-b ± √(b²-4ac)] / 2a' },
+            { keywords: ['sin cos tan', 'ත්‍රිකෝණමිතිය', 'trigonometry', 'sohcahtoa'],
+              answer: 'SOH-CAH-TOA මතක තියාගන්න: sin = ප්‍රතිමුඛ/කර්ණය, cos = යාබද/කර්ණය, tan = ප්‍රතිමුඛ/යාබද' },
+            { keywords: ['sets', 'කුලක', 'union intersection'],
+              answer: 'A∪B = A සහ B දෙකේම ඇති සියල්ල (Union). A∩B = A සහ B දෙකේම පොදු අවයව (Intersection).' },
+            { keywords: ['mean median mode', 'මධ්‍යනය', 'මධ්‍යස්ථය', 'බහුලකය', 'average'],
+              answer: 'Mean (මධ්‍යනය) = සියල්ල එකතු කර ගණන බෙදන්න. Median (මධ්‍යස්ථය) = අනුපිළිවෙලට තැබූ විට මැද අගය. Mode (බහුලකය) = වැඩිපුරම පුනරාවර්තනය වන අගය.' },
+            { keywords: ['probability', 'සම්භාවිතාව', 'chance'],
+              answer: 'සම්භාවිතාව = (අවශ්‍ය ප්‍රතිඵල ගණන) ÷ (හැකි සියලුම ප්‍රතිඵල ගණන)' }
+        ];
+
+        const chatbotSuggestionChips = [
+            { label: 'Quiz කරන්නෙ කොහොමද?', text: 'quiz කරන්නෙ කොහොමද' },
+            { label: 'Pythagoras Theorem', text: 'pythagoras' },
+            { label: 'Admin ට කතා කරන්නෙ කොහොමද?', text: 'admin ට කතා කරන්නෙ කොහොමද' },
+            { label: 'Focus Mode එක', text: 'focus mode' }
+        ];
+
+        let chatbotOpened = false;
+
+        function toggleChatbot() {
+            const panel = document.getElementById('chatbot-panel');
+            const icon = document.getElementById('chatbot-launcher-icon');
+            const opening = panel.classList.contains('hidden');
+            panel.classList.toggle('hidden');
+            icon.className = opening ? 'fa-solid fa-xmark' : 'fa-solid fa-comment-dots';
+            if (opening && !chatbotOpened) {
+                chatbotOpened = true;
+                appendChatbotMessage(currentLang === 'si'
+                    ? "ආයුබෝවන්! මම MoraBot 🤖 — App එක use කරන විදිහ ගැනත්, O/L Maths formula ගැනත් අහන්න. (මම simple keyword-based bot කෙනෙක් — සංකීර්ණ ප්‍රශ්නවලට Admin ගෙන් අහන්න.)"
+                    : "Hi! I'm MoraBot 🤖 — ask me about using the app, or basic O/L Maths formulas. (I'm a simple keyword bot — for anything complex, message the Admin!)",
+                    'bot');
+                renderChatbotSuggestions();
+            }
+            if (opening) document.getElementById('chatbot-input').focus();
+        }
+
+        function renderChatbotSuggestions() {
+            const wrap = document.getElementById('chatbot-suggestions');
+            if (!wrap) return;
+            wrap.innerHTML = chatbotSuggestionChips.map(c =>
+                `<button onclick="askChatbotSuggestion('${escapeHtml(c.text)}')" class="bg-[#0f0c1a] hover:bg-indigo-600/20 border border-slate-800 hover:border-indigo-500/40 text-[10px] text-slate-300 hover:text-white px-2.5 py-1.5 rounded-lg transition cursor-pointer">${escapeHtml(c.label)}</button>`
+            ).join('');
+        }
+
+        function askChatbotSuggestion(text) {
+            document.getElementById('chatbot-input').value = text;
+            sendChatbotMessage();
+        }
+
+        function appendChatbotMessage(text, from) {
+            const wrap = document.getElementById('chatbot-messages');
+            const bubble = document.createElement('div');
+            bubble.className = `flex ${from === 'bot' ? 'justify-start' : 'justify-end'}`;
+            bubble.innerHTML = `<div class="max-w-[85%] ${from === 'bot' ? 'bg-indigo-600/20 border border-indigo-500/30 text-indigo-100' : 'bg-slate-800 border border-slate-700 text-slate-100'} rounded-xl px-3.5 py-2.5 text-xs leading-relaxed">${escapeHtml(text)}</div>`;
+            wrap.appendChild(bubble);
+            wrap.scrollTop = wrap.scrollHeight;
+        }
+
+        function matchChatbotAnswer(input) {
+            const lower = input.toLowerCase();
+            let best = null, bestScore = 0;
+            chatbotKB.forEach(entry => {
+                let score = 0;
+                entry.keywords.forEach(kw => { if (lower.includes(kw.toLowerCase())) score++; });
+                if (score > bestScore) { bestScore = score; best = entry; }
+            });
+            if (best) return best.answer;
+            return currentLang === 'si'
+                ? "සමාවෙන්න, ඒකට මට උත්තර දෙන්න බැහැ 🙏 — Sidebar එකේ 📞 Contact Us හරහා Admin ගෙන් අහන්න."
+                : "Sorry, I can't answer that one 🙏 — try asking the Admin via Contact Us in the sidebar.";
+        }
+
+        function sendChatbotMessage() {
+            const input = document.getElementById('chatbot-input');
+            const text = input.value.trim();
+            if (!text) return;
+            appendChatbotMessage(text, 'user');
+            input.value = '';
+            const answer = matchChatbotAnswer(text);
+            setTimeout(() => appendChatbotMessage(answer, 'bot'), 350);
+        }
+
+        // Returns whichever level/game is currently active — a normal syllabus
+        // level (from mathGameLevels) or the standalone Bonus Challenge game.
+        function getActiveLevel() {
+            if (!gameState) return null;
+            return gameState.bonus ? bonusChallengeGame : mathGameLevels[gameState.levelIdx];
+        }
+
+        function getBonusBestScore() {
+            try { return JSON.parse(localStorage.getItem('moramaths_bonus_best') || 'null'); } catch (e) { return null; }
+        }
+
+        function renderBonusChallengeCard() {
+            const best = getBonusBestScore();
+            const badge = document.getElementById('bonus-challenge-best');
+            if (!badge) return;
+            if (best) {
+                badge.textContent = `${currentLang === 'si' ? 'හොඳම ලකුණු' : 'Best'}: ${best.correct}/${best.total}`;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        function startBonusChallenge() {
+            gameState = { levelIdx: -1, bonus: true, qIdx: 0, correct: 0, answered: false };
+            document.getElementById('game-levels-grid').classList.add('hidden');
+            document.getElementById('bonus-challenge-card').classList.add('hidden');
+            document.getElementById('game-result-area').classList.add('hidden');
+            document.getElementById('game-play-area').classList.remove('hidden');
+            document.getElementById('game-level-label').innerText = currentLang === 'si' ? bonusChallengeGame.titleSi : bonusChallengeGame.titleEn;
+            renderGameQuestion();
         }
 
         function renderGameLevels() {
@@ -4015,7 +4750,7 @@
         }
 
         function renderGameQuestion() {
-            const lvl = mathGameLevels[gameState.levelIdx];
+            const lvl = getActiveLevel();
             const q = lvl.questions[gameState.qIdx];
             gameState.answered = false;
             const t = translations[currentLang];
@@ -4049,7 +4784,7 @@
 
         function submitNumericGameAnswer() {
             if (!gameState || gameState.answered) return;
-            const lvl = mathGameLevels[gameState.levelIdx];
+            const lvl = getActiveLevel();
             const q = lvl.questions[gameState.qIdx];
             const input = document.getElementById('game-numeric-input');
             const val = parseInt(input.value, 10);
@@ -4077,7 +4812,7 @@
         function selectGameAnswer(oi) {
             if (!gameState || gameState.answered) return;
             gameState.answered = true;
-            const lvl = mathGameLevels[gameState.levelIdx];
+            const lvl = getActiveLevel();
             const q = lvl.questions[gameState.qIdx];
             const opts = document.getElementById('game-options').children;
             [...opts].forEach((el, idx) => {
@@ -4094,7 +4829,7 @@
         }
 
         function nextGameQuestion() {
-            const lvl = mathGameLevels[gameState.levelIdx];
+            const lvl = getActiveLevel();
             if (gameState.qIdx < lvl.questions.length - 1) {
                 gameState.qIdx++;
                 renderGameQuestion();
@@ -4104,7 +4839,7 @@
         }
 
         function finishGameLevel() {
-            const lvl = mathGameLevels[gameState.levelIdx];
+            const lvl = getActiveLevel();
             const total = lvl.questions.length;
             const correct = gameState.correct;
             const passed = correct >= Math.ceil(total * 0.6);
@@ -4126,31 +4861,41 @@
             }
             scoreP.innerText = `${correct} / ${total} ${currentLang === 'si' ? 'නිවැරදියි' : 'correct'}`;
 
-            if (currentUser) {
-                const progress = getGameProgress();
-                const levelNum = gameState.levelIdx + 1;
-                const prevScore = progress.scores[levelNum];
-                if (!prevScore || correct > prevScore.correct) {
-                    progress.scores[levelNum] = { correct, total };
+            if (gameState.bonus) {
+                // Bonus Challenge is a standalone game — just keep a best-score record,
+                // no unlock chain and no "next level" (there's only the one challenge).
+                const prevBest = getBonusBestScore();
+                if (!prevBest || correct > prevBest.correct) {
+                    localStorage.setItem('moramaths_bonus_best', JSON.stringify({ correct, total }));
                 }
-                if (passed && progress.unlocked < levelNum + 1) {
-                    progress.unlocked = Math.min(levelNum + 1, mathGameLevels.length);
+                nextBtn.classList.add('hidden');
+            } else {
+                if (currentUser) {
+                    const progress = getGameProgress();
+                    const levelNum = gameState.levelIdx + 1;
+                    const prevScore = progress.scores[levelNum];
+                    if (!prevScore || correct > prevScore.correct) {
+                        progress.scores[levelNum] = { correct, total };
+                    }
+                    if (passed && progress.unlocked < levelNum + 1) {
+                        progress.unlocked = Math.min(levelNum + 1, mathGameLevels.length);
+                    }
+                    saveGameProgress();
                 }
-                saveGameProgress();
+                const hasNext = gameState.levelIdx < mathGameLevels.length - 1;
+                nextBtn.classList.toggle('hidden', !(passed && hasNext));
             }
-
-            const hasNext = gameState.levelIdx < mathGameLevels.length - 1;
-            nextBtn.classList.toggle('hidden', !(passed && hasNext));
             showToast(`${correct}/${total} — ${passed ? (currentLang === 'si' ? 'සමත්!' : 'Passed!') : (currentLang === 'si' ? 'නැවත උත්සාහ කරන්න' : 'Keep trying')}`, passed ? 'success' : 'info');
         }
 
         function retryGameLevel() {
             if (!gameState) return;
-            startGameLevel(gameState.levelIdx);
+            if (gameState.bonus) startBonusChallenge();
+            else startGameLevel(gameState.levelIdx);
         }
 
         function goToNextGameLevel() {
-            if (!gameState) return;
+            if (!gameState || gameState.bonus) return;
             const nextIdx = gameState.levelIdx + 1;
             if (nextIdx < mathGameLevels.length) startGameLevel(nextIdx);
         }
@@ -4159,7 +4904,10 @@
             document.getElementById('game-result-area').classList.add('hidden');
             document.getElementById('game-play-area').classList.add('hidden');
             document.getElementById('game-levels-grid').classList.remove('hidden');
+            const bonusCard = document.getElementById('bonus-challenge-card');
+            if (bonusCard) bonusCard.classList.remove('hidden');
             renderGameLevels();
+            renderBonusChallengeCard();
         }
 
         /* ============ QUIZ TAKING ============ */
@@ -4333,7 +5081,7 @@
             if (!title) { showToast("Title cannot be empty", 'error'); return; }
             const prevTitle = lesson.title, prevPdf = lesson.pdf, prevCode = lesson.lessonCode;
             lesson.title = title;
-            lesson.pdf = document.getElementById('edit-lesson-pdf').value.trim() || '#';
+            lesson.pdf = processPdfLink(document.getElementById('edit-lesson-pdf').value.trim() || '#');
             lesson.lessonCode = document.getElementById('edit-lesson-code').value.trim();
             try {
                 localStorage.setItem('moramaths_weeks', JSON.stringify(weeksData));
@@ -4416,14 +5164,26 @@
             wrap.innerHTML = students.map(u => {
                 const stats = computeUserStats(u);
                 const banned = !!u.banned;
+                const active = hasActiveAccess(u);
+                let accessBadge;
+                if (active) {
+                    const d = daysUntil(u.paidUntil);
+                    accessBadge = `<span class="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded-md ml-1" title="Valid until ${u.paidUntil}"><i class="fa-solid fa-crown mr-0.5"></i>${d}d left</span>`;
+                } else if (u.paidUntil) {
+                    accessBadge = `<span class="text-[9px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/30 px-1.5 py-0.5 rounded-md ml-1"><i class="fa-solid fa-crown mr-0.5"></i>Expired</span>`;
+                } else {
+                    accessBadge = `<span class="text-[9px] font-bold text-slate-500 bg-slate-800/50 border border-slate-700 px-1.5 py-0.5 rounded-md ml-1">No Access</span>`;
+                }
                 return `
                 <div class="flex items-center justify-between gap-3 bg-[#0f0c1a] border ${banned ? 'border-rose-800/60' : 'border-slate-800'} rounded-xl px-4 py-3">
                     <div class="min-w-0">
-                        <p class="text-xs font-bold text-white truncate">${escapeHtml(toTitleCase(u.fullname))} <span class="text-slate-500 font-normal">@${escapeHtml(u.username)}</span> ${banned ? '<span class="text-[9px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/30 px-1.5 py-0.5 rounded-md ml-1">BANNED</span>' : ''}</p>
+                        <p class="text-xs font-bold text-white truncate">${escapeHtml(toTitleCase(u.fullname))} <span class="text-slate-500 font-normal">@${escapeHtml(u.username)}</span> ${banned ? '<span class="text-[9px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/30 px-1.5 py-0.5 rounded-md ml-1">BANNED</span>' : ''}${accessBadge}</p>
                         <p class="text-[10px] text-slate-500 truncate">${escapeHtml(u.email)} • ${stats.attempted} quizzes • ${stats.accuracy}% accuracy</p>
                     </div>
                     <div class="flex gap-1.5 shrink-0">
+                        <button onclick="openAccessModal('${escapeHtml(u.username)}')" title="Manage Access" class="w-7 h-7 rounded-lg ${active ? 'bg-emerald-700/40 hover:bg-emerald-600' : 'bg-slate-800 hover:bg-amber-600'} text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid fa-crown"></i></button>
                         <button onclick="openStudentProgressModal('${escapeHtml(u.username)}')" title="View Progress" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid fa-chart-line"></i></button>
+                        <button onclick="startMessageWithStudent('${escapeHtml(u.username)}')" title="Message Student" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-purple-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid fa-comment-dots"></i></button>
                         ${isMasterAdmin(currentUser) ? `<button onclick="toggleBanUser('${escapeHtml(u.username)}')" title="${banned ? 'Unban Student' : 'Ban Student'}" class="w-7 h-7 rounded-lg ${banned ? 'bg-emerald-700/40 hover:bg-emerald-600' : 'bg-slate-800 hover:bg-amber-600'} text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid ${banned ? 'fa-lock-open' : 'fa-ban'}"></i></button>` : ''}
                         <button onclick="deleteUser('${escapeHtml(u.username)}')" title="Remove Student" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid fa-user-slash"></i></button>
                     </div>
@@ -4558,13 +5318,14 @@
             }).join('');
         }
 
-        function createAdminAccount() {
+        async function createAdminAccount() {
             const fullname = toTitleCase(document.getElementById('new-admin-name').value.trim());
             const username = document.getElementById('new-admin-username').value.trim().toLowerCase();
             const password = document.getElementById('new-admin-password').value.trim();
             if (!fullname || !username || !password) { showToast("Fill in all fields to add an admin", 'error'); return; }
             if (users.some(u => u.username.toLowerCase() === username)) { showToast("Username already in use", 'error'); return; }
-            users.push({ fullname, email: `${username}@moramaths.lk`, username, password, role: 'admin', quizScores: {}, gameProgress: { unlocked: 1, scores: {} } });
+            const hashedPassword = await sha256Hex(password);
+            users.push({ fullname, email: `${username}@moramaths.lk`, username, password: hashedPassword, role: 'admin', quizScores: {}, gameProgress: { unlocked: 1, scores: {} } });
             localStorage.setItem('moramaths_users', JSON.stringify(users));
             cloudPush();
             document.getElementById('new-admin-name').value = '';
