@@ -198,6 +198,15 @@
             if (window.innerWidth < 1024) closeSidebar();
         }
 
+        // Powers the Admin quick-jump sidebar: the admin panel is one long page of
+        // cards, so this just smooth-scrolls straight to the section the admin picked
+        // instead of them having to scroll through everything manually.
+        function scrollToAdminSection(anchorId) {
+            closeSidebarOnMobile();
+            const el = document.getElementById(anchorId);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
         function sidebarGoDashboard() {
             closeSidebarOnMobile();
             const board = document.getElementById('leaderboard-section');
@@ -272,8 +281,8 @@
             const nowPlayingLabel = document.getElementById('focus-nowplaying-label');
             if (!bar) return;
             const focusModalOpen = !document.getElementById('focus-mode-modal').classList.contains('hidden');
-            const label = focusCurrentTrack ? (focusTrackLabels[focusCurrentTrack] || focusCurrentTrack) : null;
-            if (focusCurrentTrack && !focusModalOpen) {
+            const label = focusCurrentTrack ? (focusTrackLabels[focusCurrentTrack] || focusCurrentTrack) : (currentPlayingSongTitle || null);
+            if (label && !focusModalOpen) {
                 document.getElementById('focus-mini-track-name').innerText = label;
                 bar.classList.remove('hidden');
             } else {
@@ -733,22 +742,90 @@
             `).join('');
         }
 
+        /* ============ BACKGROUND SONG PLAYER (YouTube IFrame Player API) ============
+           Uses the real API (not a plain <iframe src=...>) so we can: (1) keep the video
+           visually tiny/off-screen and let it just play as background audio behind a clean
+           "Now Playing" card, and (2) catch playback errors ourselves via onError and show
+           a friendly message — students never see YouTube's own raw broken-player screen. */
+        let ytApiReady = false;
+        let ytPlayer = null;
+        let ytPendingVideoId = null;
+        let ytPendingTitle = '';
+        let currentPlayingSongTitle = null; // shown in the mini-player when Focus Mode is closed but a song is still playing in the background
+
+        function loadYouTubeIframeAPI() {
+            if (window.YT && window.YT.Player) { ytApiReady = true; if (!ytPlayer) createYtPlayer(); return; }
+            if (document.getElementById('yt-iframe-api-script')) return;
+            const tag = document.createElement('script');
+            tag.id = 'yt-iframe-api-script';
+            tag.src = 'https://www.youtube.com/iframe_api';
+            document.head.appendChild(tag);
+        }
+
+        function createYtPlayer() {
+            ytPlayer = new YT.Player('song-player-yt-target', {
+                height: '1', width: '1',
+                playerVars: { autoplay: 1, playsinline: 1 },
+                events: {
+                    onReady: () => {
+                        if (ytPendingVideoId) { ytPlayer.loadVideoById(ytPendingVideoId); ytPendingVideoId = null; }
+                    },
+                    onError: onYtPlayerError
+                }
+            });
+        }
+
+        // Required global callback name — the YouTube iframe_api script calls this itself
+        // once it has finished loading.
+        window.onYouTubeIframeAPIReady = function() {
+            ytApiReady = true;
+            createYtPlayer();
+        };
+
+        function onYtPlayerError() {
+            // Codes 101/150 = owner disabled embedding (the real cause of "Error 153"
+            // shown by YouTube's own player); 100 = video removed/private; 2 = bad id.
+            const errBox = document.getElementById('song-player-error');
+            const titleEl = document.getElementById('song-now-playing-title');
+            if (titleEl) titleEl.innerText = currentLang === 'si' ? 'Play කරන්න බැරි විය' : "Couldn't play this song";
+            if (errBox) {
+                errBox.innerText = currentLang === 'si'
+                    ? "😔 මේ song එක මෙතන play කරන්න බෑ — owner ම embedding disable කරලා. Admin ට කියලා වෙනස් link එකක් දාන්න කියන්න."
+                    : "😔 This song can't play here — the owner disabled embedding on other sites. Ask the admin to swap in a different link.";
+                errBox.classList.remove('hidden');
+            }
+        }
+
         function playSongPlaylistItem(songId) {
             const song = (songPlaylists[activeSongLang] || []).find(s => s.id === songId);
             if (!song) return;
             stopFocusTrack(); // don't overlap a real song with a generated ambient tone
             const wrap = document.getElementById('song-player-wrap');
-            const iframe = document.getElementById('song-player-iframe');
-            iframe.src = `https://www.youtube.com/embed/${song.videoId}?autoplay=1`;
+            const errBox = document.getElementById('song-player-error');
+            const titleEl = document.getElementById('song-now-playing-title');
+            if (errBox) errBox.classList.add('hidden');
+            if (titleEl) titleEl.innerText = song.title || (currentLang === 'si' ? 'ගීතය' : 'Song');
+            currentPlayingSongTitle = song.title || (currentLang === 'si' ? 'ගීතය' : 'Song');
             wrap.classList.remove('hidden');
+            loadYouTubeIframeAPI();
+            if (ytApiReady && ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
+                ytPlayer.loadVideoById(song.videoId);
+            } else {
+                ytPendingVideoId = song.videoId; // API/player still initializing — plays as soon as it's ready
+            }
+            updateMiniPlayer();
         }
 
         function stopSongPlayer() {
             const wrap = document.getElementById('song-player-wrap');
-            const iframe = document.getElementById('song-player-iframe');
-            if (!wrap || !iframe) return;
-            iframe.src = '';
+            if (!wrap) return;
+            if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
+                try { ytPlayer.stopVideo(); } catch (e) { /* player not ready yet — nothing to stop */ }
+            }
+            ytPendingVideoId = null;
+            currentPlayingSongTitle = null;
             wrap.classList.add('hidden');
+            updateMiniPlayer();
         }
 
         /* YouTube's oEmbed endpoint fails (401/403) for videos the owner has blocked from
@@ -924,18 +1001,43 @@
             <button onclick="closeSidebar()" title="Collapse Sidebar" class="w-7 h-7 rounded-lg bg-slate-900 text-slate-400 hover:text-white flex items-center justify-center text-xs cursor-pointer"><i class="fa-solid fa-xmark"></i></button>
         </div>
         <div class="flex-1 overflow-y-auto py-4 px-3 space-y-1">
-            <div class="sidebar-link active" id="sidebar-link-dashboard" onclick="sidebarGoDashboard()"><i class="fa-solid fa-house w-4 text-center"></i> <span id="txt-sidebar-dashboard">Dashboard</span></div>
-            <div class="sidebar-link" id="sidebar-link-schedule" onclick="sidebarAction('schedule')"><i class="fa-solid fa-calendar-days w-4 text-center text-indigo-300"></i> <span id="txt-sidebar-schedule">Speed Revision 2026</span></div>
-            <div class="sidebar-link" id="sidebar-link-leaderboard" onclick="sidebarAction('leaderboard')"><i class="fa-solid fa-trophy w-4 text-center text-yellow-400"></i> <span id="txt-sidebar-leaderboard">Leaderboard</span></div>
-            <div class="sidebar-link" id="sidebar-link-game" onclick="sidebarAction('game')"><i class="fa-solid fa-gamepad w-4 text-center text-emerald-400"></i> <span id="txt-sidebar-game">Level Game</span></div>
-            <div class="sidebar-link" id="sidebar-link-focus" onclick="sidebarAction('focus')">
-                <i class="fa-solid fa-brain w-4 text-center text-purple-400"></i> <span id="txt-sidebar-focus">Focus Mode</span>
-                <span id="sidebar-focus-live-dot" class="hidden w-1.5 h-1.5 rounded-full bg-emerald-400 ml-auto animate-pulse"></span>
+            <div id="student-sidebar-links" class="space-y-1">
+                <div class="sidebar-link active" id="sidebar-link-dashboard" onclick="sidebarGoDashboard()"><i class="fa-solid fa-house w-4 text-center"></i> <span id="txt-sidebar-dashboard">Dashboard</span></div>
+                <div class="sidebar-link" id="sidebar-link-schedule" onclick="sidebarAction('schedule')"><i class="fa-solid fa-calendar-days w-4 text-center text-indigo-300"></i> <span id="txt-sidebar-schedule">Speed Revision 2026</span></div>
+                <div class="sidebar-link" id="sidebar-link-leaderboard" onclick="sidebarAction('leaderboard')"><i class="fa-solid fa-trophy w-4 text-center text-yellow-400"></i> <span id="txt-sidebar-leaderboard">Leaderboard</span></div>
+                <div class="sidebar-link" id="sidebar-link-game" onclick="sidebarAction('game')"><i class="fa-solid fa-gamepad w-4 text-center text-emerald-400"></i> <span id="txt-sidebar-game">Level Game</span></div>
+                <div class="sidebar-link" id="sidebar-link-focus" onclick="sidebarAction('focus')">
+                    <i class="fa-solid fa-brain w-4 text-center text-purple-400"></i> <span id="txt-sidebar-focus">Focus Mode</span>
+                    <span id="sidebar-focus-live-dot" class="hidden w-1.5 h-1.5 rounded-full bg-emerald-400 ml-auto animate-pulse"></span>
+                </div>
+                <div class="sidebar-link" id="sidebar-link-pastpapers" onclick="sidebarAction('pastpapers')"><i class="fa-solid fa-file-lines w-4 text-center text-sky-400"></i> <span id="txt-sidebar-pastpapers">Past Papers</span></div>
+                <div class="sidebar-link" id="sidebar-link-contact" onclick="sidebarAction('contact')">
+                    <i class="fa-solid fa-headset w-4 text-center text-amber-400"></i> <span id="txt-sidebar-contact">Contact Us</span>
+                    <span id="sidebar-contact-unread-badge" class="hidden ml-auto min-w-[16px] h-4 px-1 bg-rose-500 rounded-full text-[9px] font-bold flex items-center justify-center text-white">0</span>
+                </div>
             </div>
-            <div class="sidebar-link" id="sidebar-link-pastpapers" onclick="sidebarAction('pastpapers')"><i class="fa-solid fa-file-lines w-4 text-center text-sky-400"></i> <span id="txt-sidebar-pastpapers">Past Papers</span></div>
-            <div class="sidebar-link" id="sidebar-link-contact" onclick="sidebarAction('contact')">
-                <i class="fa-solid fa-headset w-4 text-center text-amber-400"></i> <span id="txt-sidebar-contact">Contact Us</span>
-                <span id="sidebar-contact-unread-badge" class="hidden ml-auto min-w-[16px] h-4 px-1 bg-rose-500 rounded-full text-[9px] font-bold flex items-center justify-center text-white">0</span>
+
+            <!-- ADMIN QUICK-JUMP SIDEBAR — scrolls the (long, single-page) admin panel
+                 straight to each section instead of the admin having to scroll through
+                 everything manually. Master-admin-only sections reuse the existing
+                 .master-admin-only class so they hide automatically for regular admins. -->
+            <div id="admin-sidebar-links" class="hidden space-y-1">
+                <p class="sidebar-section-label" id="txt-sidebar-admin-controls">Controls</p>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-zoom')"><i class="fa-solid fa-video w-4 text-center text-rose-400"></i> <span>Zoom Class</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-lessons')"><i class="fa-solid fa-book-medical w-4 text-center text-indigo-300"></i> <span>Add Lesson</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-weeks')"><i class="fa-solid fa-layer-group w-4 text-center text-indigo-300"></i> <span>Weeks & Lessons</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-quizbuilder')"><i class="fa-solid fa-circle-question w-4 text-center text-indigo-300"></i> <span>Quiz Builder</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-students')"><i class="fa-solid fa-users w-4 text-center text-emerald-400"></i> <span>Students</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-messages')"><i class="fa-solid fa-comments w-4 text-center text-emerald-400"></i> <span>Messages</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-announce')"><i class="fa-solid fa-bullhorn w-4 text-center text-purple-400"></i> <span>Announcements</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-graph')"><i class="fa-solid fa-chart-line w-4 text-center text-purple-400"></i> <span>Progress Graph</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-goals')"><i class="fa-solid fa-bullseye w-4 text-center text-purple-400"></i> <span>Goals</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-pastpapers-admin')"><i class="fa-solid fa-file-lines w-4 text-center text-sky-400"></i> <span>Past Papers</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-songs')"><i class="fa-brands fa-youtube w-4 text-center text-sky-400"></i> <span>Song Playlists</span></div>
+                <div class="sidebar-link master-admin-only hidden" onclick="scrollToAdminSection('anchor-contact-settings')"><i class="fa-solid fa-headset w-4 text-center text-amber-400"></i> <span>Contact Settings</span></div>
+                <div class="sidebar-link master-admin-only hidden" onclick="scrollToAdminSection('anchor-appearance')"><i class="fa-solid fa-image w-4 text-center text-amber-400"></i> <span>Site Appearance</span></div>
+                <div class="sidebar-link master-admin-only hidden" onclick="scrollToAdminSection('anchor-admin-accounts')"><i class="fa-solid fa-user-shield w-4 text-center text-amber-400"></i> <span>Admin Accounts</span></div>
+                <div class="sidebar-link master-admin-only hidden" onclick="scrollToAdminSection('anchor-backup')"><i class="fa-solid fa-database w-4 text-center text-amber-400"></i> <span>Backup &amp; Restore</span></div>
             </div>
 
             <p class="sidebar-section-label mt-3" id="txt-sidebar-account">Account</p>
@@ -1087,6 +1189,7 @@
                         <h2 class="text-xl sm:text-3xl font-black tracking-tight truncate" id="welcome-student-name">ආයුබෝවන්</h2>
                         <p class="text-xs text-indigo-300 font-semibold flex flex-wrap items-center gap-2">
                             <span id="student-portal-subtitle">O/L Speed Revision Student Portal</span>
+                            <span id="dashboard-studentid-badge" class="hidden text-[9px] bg-indigo-600/25 text-indigo-200 border border-indigo-500/40 px-2 py-0.5 rounded-md whitespace-nowrap font-bold tracking-wide"><i class="fa-solid fa-id-card mr-1"></i><span id="dashboard-studentid-text"></span></span>
                             <span class="text-[9px] bg-indigo-900/60 text-indigo-200 border border-indigo-700/50 px-2 py-0.5 rounded-md whitespace-nowrap"><i class="fa-solid fa-hand-pointer mr-1"></i>View Profile</span>
                         </p>
                     </div>
@@ -1311,11 +1414,13 @@
                     <p id="contact-telegram-empty" class="hidden bg-[#0f0c1a] border border-dashed border-slate-700 text-slate-500 rounded-2xl px-4 py-4 text-[11px] flex items-center">Telegram not set up yet.</p>
                     <a id="contact-phone1-link" href="#" class="hidden bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-300 rounded-2xl px-4 py-4 flex items-center gap-3 transition">
                         <i class="fa-solid fa-phone text-xl"></i>
-                        <div class="text-left"><p class="text-xs font-black">Call Us</p><p id="contact-phone1-number" class="text-[10px] opacity-70"></p></div>
+                        <div class="text-left flex-1 min-w-0"><p class="text-xs font-black">Call Us</p><p id="contact-phone1-number" class="text-[10px] opacity-70 truncate"></p></div>
+                        <button onclick="event.preventDefault(); event.stopPropagation(); copyToClipboard(contactData.phone1, this);" title="Copy number" class="shrink-0 w-8 h-8 rounded-lg bg-indigo-600/25 hover:bg-indigo-600/45 text-indigo-200 flex items-center justify-center text-xs cursor-pointer transition"><i class="fa-regular fa-copy"></i></button>
                     </a>
                     <a id="contact-phone2-link" href="#" class="hidden bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-300 rounded-2xl px-4 py-4 flex items-center gap-3 transition">
                         <i class="fa-solid fa-phone text-xl"></i>
-                        <div class="text-left"><p class="text-xs font-black">Call Us</p><p id="contact-phone2-number" class="text-[10px] opacity-70"></p></div>
+                        <div class="text-left flex-1 min-w-0"><p class="text-xs font-black">Call Us</p><p id="contact-phone2-number" class="text-[10px] opacity-70 truncate"></p></div>
+                        <button onclick="event.preventDefault(); event.stopPropagation(); copyToClipboard(contactData.phone2, this);" title="Copy number" class="shrink-0 w-8 h-8 rounded-lg bg-indigo-600/25 hover:bg-indigo-600/45 text-indigo-200 flex items-center justify-center text-xs cursor-pointer transition"><i class="fa-regular fa-copy"></i></button>
                     </a>
                 </div>
 
@@ -1344,7 +1449,7 @@
 
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
-                        <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-video"></i> Zoom Live Class විස්තර</h3>
+                        <h3 id="anchor-zoom" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-video"></i> Zoom Live Class විස්තර</h3>
                         <div class="space-y-3">
                             <div>
                                 <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Zoom Meeting Link</label>
@@ -1364,7 +1469,7 @@
 
                     <div class="lg:col-span-2 space-y-6">
                         <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
-                            <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-book-medical"></i> සතියකට අලුත් පාඩමක් හෝ PDF එකක් එක් කරන්න</h3>
+                            <h3 id="anchor-lessons" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-book-medical"></i> සතියකට අලුත් පාඩමක් හෝ PDF එකක් එක් කරන්න</h3>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                     <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">අදාළ සතිය තෝරන්න</label>
@@ -1397,7 +1502,7 @@
 
                         <!-- ANNOUNCEMENT -->
                         <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
-                            <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-bullhorn"></i> සිසුන් සියලුදෙනාට Notification එකක් යවන්න</h3>
+                            <h3 id="anchor-announce" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-bullhorn"></i> සිසුන් සියලුදෙනාට Notification එකක් යවන්න</h3>
                             <input type="text" id="admin-notif-text" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition" placeholder="උදා: New lesson added to Week 3!">
                             <button onclick="sendAdminNotification()" class="w-full bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg"><i class="fa-solid fa-paper-plane mr-1"></i> Send Announcement</button>
 
@@ -1413,7 +1518,7 @@
 
                         <!-- PROGRESS GRAPH SETTINGS -->
                         <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
-                            <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-chart-line"></i> ප්‍රගති ප්‍රස්ථාරයේ මූලාශ්‍රය (Progress Graph Source)</h3>
+                            <h3 id="anchor-graph" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-chart-line"></i> ප්‍රගති ප්‍රස්ථාරයේ මූලාශ්‍රය (Progress Graph Source)</h3>
                             <p class="text-[10px] text-slate-500 leading-relaxed">සිසුන්ගේ dashboard එකේ පෙන්නන Progress Graph එක මොන Paper/Week එකේ Quiz ලකුණු වලින්ද හදන්නේ කියලා මෙතනින් තෝරන්න. සියලුම සිසුන්ටම එකම මූලාශ්‍රය පෙන්වයි.</p>
                             <div>
                                 <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Paper / Week තෝරන්න</label>
@@ -1424,7 +1529,7 @@
 
                         <!-- GOALS & ACHIEVEMENTS SETTINGS -->
                         <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
-                            <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-bullseye"></i> Goals &amp; Achievements කළමනාකරණය</h3>
+                            <h3 id="anchor-goals" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-bullseye"></i> Goals &amp; Achievements කළමනාකරණය</h3>
                             <p class="text-[10px] text-slate-500 leading-relaxed">සිසුන්ගේ dashboard එකේ "Revision Completed" % එකයි "Papers" ගණනයි කුමන දත්තයකින් පෙන්වන්නද කියා පමණක් තෝරන්න — අගයන් එක් එක් සිසුවා සැබවින්ම කර ඇති දේ අනුව ස්වයංක්‍රීයව ගණනය වේ.</p>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
@@ -1449,7 +1554,7 @@
 
                 <!-- PAST PAPERS MANAGER -->
                 <div class="border-t border-slate-800 pt-6 space-y-4">
-                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-file-lines"></i> Past Papers කළමනාකරණය</h3>
+                    <h3 id="anchor-pastpapers-admin" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-file-lines"></i> Past Papers කළමනාකරණය</h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
                         <p class="text-[10px] text-slate-500 leading-relaxed">වසරක් එකතු කරලා, ඒ යටතට papers දාන්න. "Published" කරන තුරු සිසුන්ට "Coming Soon" විදිහට පෙන්වයි — වසර අනුව වෙන වෙනම publish කරන්න පුළුවන්.</p>
                         <div class="flex gap-2">
@@ -1462,7 +1567,7 @@
 
                 <!-- SONG PLAYLISTS MANAGER (Focus Mode — real songs via official YouTube embed) -->
                 <div class="border-t border-slate-800 pt-6 space-y-4">
-                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-brands fa-youtube"></i> Focus Mode Song Playlists</h3>
+                    <h3 id="anchor-songs" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-brands fa-youtube"></i> Focus Mode Song Playlists</h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
                         <p class="text-[10px] text-slate-500 leading-relaxed">English / Sinhala / Hindi song එකක් වචනයෙන් නමක් සහ YouTube link එකක් දාන්න — Focus Mode එකේ සිසුන්ට official YouTube player එකෙන්ම play කරන්න පුළුවන් වෙනවා. (කැමති ගණනක් songs දාන්න පුළුවන්, 3ක් යෝජනා කළත්.)</p>
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1516,7 +1621,7 @@
 
                 <!-- STUDENT MESSAGES INBOX -->
                 <div class="border-t border-slate-800 pt-6 space-y-4">
-                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-comments"></i> Student Messages</h3>
+                    <h3 id="anchor-messages" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-comments"></i> Student Messages</h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl shadow-inner grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div id="admin-messages-inbox" class="space-y-2 max-h-80 overflow-y-auto pr-1"></div>
                         <div id="admin-message-thread-wrap" class="hidden flex flex-col">
@@ -1533,7 +1638,7 @@
 
                 <!-- CONTACT US SETTINGS (Master Admin only) -->
                 <div class="master-admin-only hidden border-t border-slate-800 pt-6 space-y-4">
-                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-headset"></i> Contact Us Links <span class="text-[9px] bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-md">Master Admin Only</span></h3>
+                    <h3 id="anchor-contact-settings" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-headset"></i> Contact Us Links <span class="text-[9px] bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-md">Master Admin Only</span></h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div class="space-y-1">
@@ -1560,7 +1665,7 @@
 
                 <!-- SITE APPEARANCE (Master Admin only) -->
                 <div class="master-admin-only hidden border-t border-slate-800 pt-6 space-y-4">
-                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-image"></i> අඩවියේ පින්තූර කළමනාකරණය (Site Appearance) <span class="text-[9px] bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-md">Master Admin Only</span></h3>
+                    <h3 id="anchor-appearance" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-image"></i> අඩවියේ පින්තූර කළමනාකරණය (Site Appearance) <span class="text-[9px] bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-md">Master Admin Only</span></h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div class="space-y-1">
@@ -1578,7 +1683,7 @@
 
                 <!-- ADMIN ACCOUNTS (Master Admin only) -->
                 <div class="master-admin-only hidden border-t border-slate-800 pt-6 space-y-4">
-                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-user-shield"></i> Admin ගිණුම් කළමනාකරණය <span class="text-[9px] bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-md">Master Admin Only</span></h3>
+                    <h3 id="anchor-admin-accounts" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-user-shield"></i> Admin ගිණුම් කළමනාකරණය <span class="text-[9px] bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-md">Master Admin Only</span></h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
                         <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
                             <input type="text" id="new-admin-name" placeholder="Full Name" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition">
@@ -1592,7 +1697,7 @@
 
                 <!-- BACKUP & RESTORE (Master Admin only) -->
                 <div class="master-admin-only hidden border-t border-slate-800 pt-6 space-y-4">
-                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-database"></i> Backup &amp; Restore <span class="text-[9px] bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-md">Master Admin Only</span></h3>
+                    <h3 id="anchor-backup" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-database"></i> Backup &amp; Restore <span class="text-[9px] bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-md">Master Admin Only</span></h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-3 shadow-inner">
                         <p class="text-[11px] text-slate-400 leading-relaxed">සම්පූර්ණ site data (users, weeks, quizzes, notifications, appearance) JSON file එකක් විදිහට download කරගන්න, හෝ backup එකකින් restore කරන්න.</p>
                         <div class="flex flex-col sm:flex-row gap-3">
@@ -1607,13 +1712,13 @@
 
                 <!-- WEEKS & LESSONS MANAGER -->
                 <div class="border-t border-slate-800 pt-6 space-y-4">
-                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-layer-group"></i> සති සහ පාඩම් කළමනාකරණය (Manage Weeks &amp; Lessons)</h3>
+                    <h3 id="anchor-weeks" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-layer-group"></i> සති සහ පාඩම් කළමනාකරණය (Manage Weeks &amp; Lessons)</h3>
                     <div id="admin-weeks-manager" class="grid grid-cols-1 lg:grid-cols-2 gap-4"></div>
                 </div>
 
                 <!-- QUIZ BUILDER -->
                 <div class="border-t border-slate-800 pt-6 space-y-4">
-                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-circle-question"></i> ප්‍රශ්නාවලි නිර්මාණය (Quiz Builder)</h3>
+                    <h3 id="anchor-quizbuilder" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-circle-question"></i> ප්‍රශ්නාවලි නිර්මාණය (Quiz Builder)</h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div>
@@ -1650,7 +1755,7 @@
 
                 <!-- USERS MANAGER -->
                 <div class="border-t border-slate-800 pt-6 space-y-4">
-                    <h3 class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-users"></i> ලියාපදිංචි සිසුන් (Registered Students) — <span id="admin-user-count">0</span></h3>
+                    <h3 id="anchor-students" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-users"></i> ලියාපදිංචි සිසුන් (Registered Students) — <span id="admin-user-count">0</span></h3>
                     <div id="admin-users-list" class="space-y-2"></div>
                 </div>
             </div>
@@ -1668,6 +1773,13 @@
                 <p id="modal-profile-email" class="text-xs text-slate-400 break-words">email@example.com</p>
             </div>
             <div class="bg-[#0f0c1a] border border-slate-800 rounded-2xl p-4 space-y-3.5 shadow-inner">
+                <div id="modal-profile-studentid-row" class="hidden flex justify-between items-center border-b border-slate-800/80 pb-2.5 gap-2">
+                    <span class="text-[10px] font-bold text-slate-400 uppercase whitespace-nowrap"><i class="fa-solid fa-id-card mr-1.5 text-indigo-400"></i> Student ID</span>
+                    <span class="flex items-center gap-1.5">
+                        <span id="modal-profile-studentid" class="text-xs font-black text-indigo-300 tracking-wide">ML26-001</span>
+                        <button onclick="copyToClipboard(currentUser.studentId, this)" title="Copy" class="w-6 h-6 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-regular fa-copy"></i></button>
+                    </span>
+                </div>
                 <div class="flex justify-between items-center border-b border-slate-800/80 pb-2.5 gap-2">
                     <span class="text-[10px] font-bold text-slate-400 uppercase whitespace-nowrap"><i class="fa-regular fa-user mr-1.5 text-indigo-400"></i> Username</span>
                     <span id="modal-profile-user" class="text-xs font-bold text-slate-200 truncate">username</span>
@@ -1686,6 +1798,7 @@
             <button onclick="closeOtpModal()" class="absolute top-4 right-4 w-8 h-8 rounded-xl bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center text-xs cursor-pointer transition"><i class="fa-solid fa-xmark"></i></button>
             <h3 id="otp-title" class="text-sm font-black text-white">විද්‍යුත් තැපෑලය සත්‍යාපනය (OTP Verification)</h3>
             <p id="otp-desc" class="text-xs text-slate-400 leading-relaxed">ඔබේ Email ලිපිනයට ලැබුණු OTP අංකය මෙහි ඇතුළත් කරන්න.</p>
+            <p class="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 leading-relaxed"><i class="fa-solid fa-triangle-exclamation mr-1"></i> <span id="otp-spam-note">Email එක Inbox එකේ නැත්නම්, Spam / Junk folder එකත් check කරන්න.</span></p>
             <input type="text" id="otp-input" inputmode="numeric" maxlength="6" class="w-full bg-[#0f0c1a] border border-slate-800 rounded-2xl px-4 py-3 text-center text-xl tracking-widest text-white font-black focus:border-indigo-500 focus:outline-none shadow-inner" placeholder="123456">
             <button onclick="verifyAndRegister()" id="otp-btn-text" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-3 rounded-xl transition shadow-lg cursor-pointer">Verify & Register</button>
             <button onclick="resendOtp()" id="otp-resend-btn" class="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition cursor-pointer"><i class="fa-solid fa-rotate-right mr-1"></i> <span id="txt-otp-resend">Resend OTP</span></button>
@@ -1788,6 +1901,7 @@
                     <div class="min-w-0">
                         <h3 id="sp-modal-name" class="text-sm font-black text-white truncate">Student</h3>
                         <p id="sp-modal-email" class="text-[10px] text-slate-500 truncate"></p>
+                        <p id="sp-modal-studentid" class="hidden text-[10px] font-bold text-indigo-300 mt-0.5"></p>
                     </div>
                 </div>
                 <button onclick="closeStudentProgressModal()" class="w-8 h-8 rounded-xl bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center text-xs cursor-pointer transition shrink-0"><i class="fa-solid fa-xmark"></i></button>
@@ -1866,7 +1980,7 @@
 
         <div class="relative z-10 h-full w-full overflow-y-auto flex items-start justify-center p-4 pt-4 sm:pt-6 pb-10" style="scroll-behavior: smooth; -webkit-overflow-scrolling: touch;">
         <div class="w-full max-w-md text-center space-y-8">
-            <div class="sticky top-0 z-20 bg-[#0b0914]/95 backdrop-blur-xl -mx-4 px-4 pt-12 sm:pt-2 pb-3 space-y-5">
+            <div class="pt-10 sm:pt-2 pb-1 space-y-5">
                 <div>
                     <p class="text-[11px] font-bold text-indigo-300 uppercase tracking-[0.2em] mb-2"><i class="fa-solid fa-brain mr-1.5"></i> Focus Mode</p>
                     <p id="focus-timer-display" class="text-6xl sm:text-7xl font-black text-white tabular-nums tracking-tight">25:00</p>
@@ -1974,11 +2088,23 @@
                     </div>
                     <div id="song-playlist-list" class="space-y-1.5"></div>
                     <div id="song-player-wrap" class="hidden space-y-2">
-                        <div class="aspect-video w-full rounded-2xl overflow-hidden border border-slate-800 shadow-inner relative">
-                            <iframe id="song-player-iframe" class="w-full h-full" src="" title="Song player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                        <div class="bg-indigo-600/10 border border-indigo-500/30 rounded-2xl px-4 py-3.5 flex items-center gap-3">
+                            <div class="w-9 h-9 rounded-xl bg-indigo-600/30 border border-indigo-500/40 text-indigo-200 flex items-center justify-center text-sm shrink-0">
+                                <i class="fa-solid fa-music"></i>
+                            </div>
+                            <div class="min-w-0 flex-1">
+                                <p class="text-[9px] text-indigo-300 font-bold uppercase tracking-wider" id="song-now-playing-label">Now Playing (Background)</p>
+                                <p id="song-now-playing-title" class="text-xs font-bold text-white truncate">—</p>
+                            </div>
+                            <button onclick="stopSongPlayer()" title="Close" class="shrink-0 w-8 h-8 rounded-lg bg-slate-900 hover:bg-rose-600 text-slate-400 hover:text-white flex items-center justify-center text-xs cursor-pointer transition"><i class="fa-solid fa-xmark"></i></button>
                         </div>
-                        <button onclick="stopSongPlayer()" class="w-full bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white text-[10px] font-bold py-2 rounded-xl transition cursor-pointer"><i class="fa-solid fa-stop mr-1"></i> Stop</button>
-                        <p class="text-[9px] text-amber-400/80 leading-relaxed"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Getting a playback error here (e.g. "Error 153")? That means the video's owner has disabled it from playing on other websites — this can't be fixed on our end. Ask the admin to swap in a different video link that allows embedding.</p>
+                        <p id="song-player-error" class="hidden text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2.5 leading-relaxed"></p>
+                        <!-- Hidden target for the YouTube player — kept tiny/off-screen (never
+                             display:none, which would pause it) so songs play as background
+                             audio behind a clean card instead of a big video box, and any
+                             playback error is caught via the API instead of showing YouTube's
+                             own raw error screen to students. -->
+                        <div id="song-player-yt-target" style="width:1px;height:1px;overflow:hidden;position:absolute;left:-9999px;top:-9999px;"></div>
                     </div>
                     <p class="text-[9px] text-slate-600 leading-relaxed"><i class="fa-solid fa-circle-info mr-1"></i> Played through YouTube's own official player — these are links the admin has added, not files stored on this site.</p>
                 </div>
@@ -2021,7 +2147,7 @@
          O/L Maths + app-usage knowledge base. Safe to run in a public static file since
          no API key is involved.) -->
     <div id="chatbot-launcher-wrap" class="hidden fixed bottom-5 right-5 z-[85]">
-        <button onclick="toggleChatbot()" id="chatbot-launcher-btn" class="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-2xl flex items-center justify-center text-xl cursor-pointer transition shine-btn" title="Ask MoraBot">
+        <button onclick="toggleChatbot()" id="chatbot-launcher-btn" class="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-2xl flex items-center justify-center text-xl cursor-pointer transition shine-btn" title="Ask LabBot">
             <i class="fa-solid fa-comment-dots" id="chatbot-launcher-icon"></i>
         </button>
     </div>
@@ -2031,7 +2157,7 @@
             <div class="flex items-center gap-2.5 min-w-0">
                 <div class="w-8 h-8 rounded-xl bg-indigo-600/40 border border-indigo-500/50 text-yellow-300 flex items-center justify-center text-xs shrink-0"><i class="fa-solid fa-robot"></i></div>
                 <div class="min-w-0">
-                    <p class="text-xs font-extrabold text-white truncate" id="chatbot-title">MoraBot</p>
+                    <p class="text-xs font-extrabold text-white truncate" id="chatbot-title">LabBot</p>
                     <p class="text-[9px] text-slate-400 truncate" id="chatbot-subtitle">O/L Maths සහ App එකට උදව්වක්</p>
                 </div>
             </div>
@@ -2062,7 +2188,7 @@
             <p class="text-[9px] font-bold text-indigo-300 uppercase tracking-wider">Now Playing</p>
             <p id="focus-mini-track-name" class="text-xs font-bold text-white truncate">Deep Focus</p>
         </div>
-        <button onclick="event.stopPropagation(); stopFocusTrack(); updateMiniPlayer();" class="ml-1 w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition shrink-0" title="Stop"><i class="fa-solid fa-stop"></i></button>
+        <button onclick="event.stopPropagation(); stopFocusTrack(); stopSongPlayer();" class="ml-1 w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition shrink-0" title="Stop"><i class="fa-solid fa-stop"></i></button>
     </div>
 
 
@@ -2144,6 +2270,10 @@
                 ? getUnreadAdminMessageCount(currentUser.username) : 0;
             if (data.studentMessages) { studentMessages = data.studentMessages; localStorage.setItem('moramaths_messages', JSON.stringify(studentMessages)); }
             if (data.songPlaylists) { songPlaylists = data.songPlaylists; localStorage.setItem('moramaths_songplaylists', JSON.stringify(songPlaylists)); }
+            if (typeof data.nextStudentIdSeq === 'number' && data.nextStudentIdSeq > nextStudentIdSeq) {
+                nextStudentIdSeq = data.nextStudentIdSeq;
+                localStorage.setItem('moramaths_next_student_id', String(nextStudentIdSeq));
+            }
             // Keep the logged-in user's own record (quiz scores, streak, game progress) fresh too,
             // in case it changed from another device.
             if (typeof currentUser !== 'undefined' && currentUser) {
@@ -2180,7 +2310,7 @@
             if (!firebaseReady || suppressCloudPush || !cloudDocRef) return;
             cloudDocRef.set({
                 users, weeksData, zoomData, notifications, siteAssets, progressGraphConfig, goalsData,
-                pastPapersData, contactData, studentMessages, songPlaylists,
+                pastPapersData, contactData, studentMessages, songPlaylists, nextStudentIdSeq,
                 updatedAt: Date.now()
             }, { merge: true }).catch(err => console.warn('Cloud sync push failed:', err));
         }
@@ -2308,8 +2438,8 @@
             const rows = [];
             if (contactData.whatsapp) rows.push(`<a href="${contactData.whatsapp}" target="_blank" class="flex items-center gap-3 bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/30 text-emerald-300 rounded-2xl px-4 py-3 transition"><i class="fa-brands fa-whatsapp text-lg"></i><span class="text-xs font-bold">WhatsApp</span></a>`);
             if (contactData.telegram) rows.push(`<a href="${contactData.telegram}" target="_blank" class="flex items-center gap-3 bg-sky-600/15 hover:bg-sky-600/25 border border-sky-500/30 text-sky-300 rounded-2xl px-4 py-3 transition"><i class="fa-brands fa-telegram text-lg"></i><span class="text-xs font-bold">Telegram</span></a>`);
-            if (contactData.phone1) rows.push(`<a href="tel:${contactData.phone1.replace(/[^0-9+]/g, '')}" class="flex items-center gap-3 bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-300 rounded-2xl px-4 py-3 transition"><i class="fa-solid fa-phone text-lg"></i><span class="text-xs font-bold">${escapeHtml(contactData.phone1)}</span></a>`);
-            if (contactData.phone2) rows.push(`<a href="tel:${contactData.phone2.replace(/[^0-9+]/g, '')}" class="flex items-center gap-3 bg-indigo-600/15 hover:bg-indigo-600/25 border border-indigo-500/30 text-indigo-300 rounded-2xl px-4 py-3 transition"><i class="fa-solid fa-phone text-lg"></i><span class="text-xs font-bold">${escapeHtml(contactData.phone2)}</span></a>`);
+            if (contactData.phone1) rows.push(`<div class="flex items-center gap-3 bg-indigo-600/15 border border-indigo-500/30 text-indigo-300 rounded-2xl px-4 py-3"><a href="tel:${contactData.phone1.replace(/[^0-9+]/g, '')}" class="flex items-center gap-3 flex-1 min-w-0"><i class="fa-solid fa-phone text-lg"></i><span class="text-xs font-bold truncate">${escapeHtml(contactData.phone1)}</span></a><button onclick="copyToClipboard('${escapeHtml(contactData.phone1)}', this)" title="Copy" class="shrink-0 w-7 h-7 rounded-lg bg-indigo-600/25 hover:bg-indigo-600/45 text-indigo-200 flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-regular fa-copy"></i></button></div>`);
+            if (contactData.phone2) rows.push(`<div class="flex items-center gap-3 bg-indigo-600/15 border border-indigo-500/30 text-indigo-300 rounded-2xl px-4 py-3"><a href="tel:${contactData.phone2.replace(/[^0-9+]/g, '')}" class="flex items-center gap-3 flex-1 min-w-0"><i class="fa-solid fa-phone text-lg"></i><span class="text-xs font-bold truncate">${escapeHtml(contactData.phone2)}</span></a><button onclick="copyToClipboard('${escapeHtml(contactData.phone2)}', this)" title="Copy" class="shrink-0 w-7 h-7 rounded-lg bg-indigo-600/25 hover:bg-indigo-600/45 text-indigo-200 flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-regular fa-copy"></i></button></div>`);
             wrap.innerHTML = rows.join('');
             empty.classList.toggle('hidden', rows.length > 0);
             document.getElementById('banned-modal-title').innerText = currentLang === 'si' ? "ඔබගේ ගිණුම අත්හිටුවා ඇත" : "Your account has been suspended";
@@ -2617,6 +2747,7 @@
                 quizBtn: "Quiz",
                 otpTitle: "විද්‍යුත් තැපෑලය සත්‍යාපනය (OTP Verification)",
                 otpDesc: "ඔබේ Email ලිපිනයට ලැබුණු OTP අංකය මෙහි ඇතුළත් කරන්න.",
+                otpSpamNote: "Email එක Inbox එකේ නැත්නම්, Spam / Junk folder එකත් check කරන්න.",
                 otpBtn: "සත්‍යාපනය කර ලියාපදිංචි වන්න",
                 otpBtnLogin: "සත්‍යාපනය කර පිවිසෙන්න",
                 otpResend: "OTP නැවත එවන්න",
@@ -2681,6 +2812,7 @@
                 quizBtn: "Quiz",
                 otpTitle: "Email OTP Verification",
                 otpDesc: "Enter the OTP code received to your email address.",
+                otpSpamNote: "Don't see it in your Inbox? Check your Spam / Junk folder too.",
                 otpBtn: "Verify & Register",
                 otpBtnLogin: "Verify & Login",
                 otpResend: "Resend OTP",
@@ -2910,6 +3042,22 @@
            the app data. scope: 'all' shows every attempted quiz combined; a numeric
            string (e.g. "2") restricts the graph to quizzes belonging to that week index. */
         let progressGraphConfig = JSON.parse(localStorage.getItem('moramaths_progress_config')) || { scope: 'all' };
+
+        /* Sequential Student ID counter (format "ML26-001", "ML26-002"...) — "ML" for
+           MathLab, "26" for the 2026 intake. Synced like the rest of the shared state so
+           every device keeps assigning unique numbers; generateStudentId() also double-
+           checks against the current users list as a safety net against duplicates. */
+        let nextStudentIdSeq = parseInt(localStorage.getItem('moramaths_next_student_id')) || 1;
+
+        function generateStudentId() {
+            let id;
+            do {
+                id = 'ML26-' + String(nextStudentIdSeq).padStart(3, '0');
+                nextStudentIdSeq++;
+            } while (users.some(u => u.studentId === id));
+            localStorage.setItem('moramaths_next_student_id', String(nextStudentIdSeq));
+            return id;
+        }
         let goalsData = JSON.parse(localStorage.getItem('moramaths_goals_data')) || { revisionMetric: 'quizzes', papersMetric: 'quizzes' };
         let pastPapersData = JSON.parse(localStorage.getItem('moramaths_pastpapers')) || [];
         let contactData = JSON.parse(localStorage.getItem('moramaths_contact')) || { whatsapp: '', telegram: '', phone1: '', phone2: '' };
@@ -3087,6 +3235,7 @@
                     if (l.lessonCode === undefined) l.lessonCode = '';
                 });
             });
+            let assignedNewStudentIds = false;
             users.forEach(u => {
                 if (!u.quizScores) u.quizScores = {};
                 if (!u.gameProgress) u.gameProgress = { unlocked: 1, scores: {} };
@@ -3094,7 +3243,17 @@
                 if (!u.streak) u.streak = { count: 0, lastDate: '' };
                 if (!u.solvedPapers) u.solvedPapers = [];
                 if (u.banned === undefined) u.banned = false;
+                if (!u.studentId && !isAdminUser(u)) { u.studentId = generateStudentId(); assignedNewStudentIds = true; }
+                if (u.studentId && u.studentId.startsWith('MM26-')) { u.studentId = 'ML26-' + u.studentId.slice(5); assignedNewStudentIds = true; }
             });
+            // Student IDs are sequential/generated, unlike the other constant-default
+            // backfills above — if we don't save this immediately, a fresh page load
+            // would regenerate a *different* id next time (users gets fully replaced by
+            // whatever the cloud last had). Persist right away so it sticks.
+            if (assignedNewStudentIds) {
+                localStorage.setItem('moramaths_users', JSON.stringify(users));
+                cloudPush();
+            }
             if (!Array.isArray(pastPapersData)) pastPapersData = [];
             if (!goalsData || typeof goalsData !== 'object') goalsData = { revisionMetric: 'quizzes', papersMetric: 'quizzes' };
             if (!goalsData.revisionMetric) goalsData.revisionMetric = 'quizzes';
@@ -3145,6 +3304,8 @@
                     document.getElementById('student-dashboard').classList.add('hidden');
                     document.getElementById('chatbot-launcher-wrap').classList.add('hidden');
                     document.getElementById('chatbot-panel').classList.add('hidden');
+                    document.getElementById('student-sidebar-links').classList.add('hidden');
+                    document.getElementById('admin-sidebar-links').classList.remove('hidden');
                     loadAdminZoomForm();
                     renderAdminWeeksManager();
                     populateQuizWeekSelect();
@@ -3162,6 +3323,8 @@
                 } else {
                     document.getElementById('student-dashboard').classList.remove('hidden');
                     document.getElementById('admin-panel').classList.add('hidden');
+                    document.getElementById('admin-sidebar-links').classList.add('hidden');
+                    document.getElementById('student-sidebar-links').classList.remove('hidden');
                     setupStudentDashboard();
                     renderChart();
                     document.getElementById('chatbot-launcher-wrap').classList.remove('hidden');
@@ -3241,6 +3404,10 @@
             descEl.innerText = (currentLang === 'si'
                 ? `${email} වෙත එවන ලද 6-ඉලක්කම් OTP අංකය මෙහි ඇතුළත් කරන්න.`
                 : `Enter the 6-digit OTP code sent to ${email}.`);
+            const spamNoteEl = document.getElementById('otp-spam-note');
+            if (spamNoteEl) spamNoteEl.innerText = currentLang === 'si'
+                ? "Email එක Inbox එකේ නැත්නම්, Spam / Junk folder එකත් check කරන්න."
+                : "Don't see it in your Inbox? Check your Spam / Junk folder too.";
             document.getElementById('otp-btn-text').innerText = t.otpBtn;
             document.getElementById('txt-otp-resend').innerText = t.otpResend;
         }
@@ -3388,6 +3555,7 @@
             if (enteredOtp === tempRegData.otp) {
                 const { otp, ...userRecord } = tempRegData;
                 userRecord.password = await sha256Hex(userRecord.password);
+                userRecord.studentId = generateStudentId();
                 users.push(userRecord);
                 localStorage.setItem('moramaths_users', JSON.stringify(users));
                 cloudPush();
@@ -3418,6 +3586,15 @@
             const formattedName = toTitleCase(currentUser.fullname);
             document.getElementById('welcome-student-name').innerText = (currentLang === 'si' ? "ආයුබෝවන්, " : "Welcome, ") + formattedName + "!";
             document.getElementById('student-avatar').innerText = formattedName.charAt(0).toUpperCase();
+            const idBadge = document.getElementById('dashboard-studentid-badge');
+            if (idBadge) {
+                if (currentUser.studentId) {
+                    document.getElementById('dashboard-studentid-text').innerText = currentUser.studentId;
+                    idBadge.classList.remove('hidden');
+                } else {
+                    idBadge.classList.add('hidden');
+                }
+            }
             
             if (hasActiveAccess(currentUser)) {
                 document.getElementById('student-zoom-box').innerHTML = `
@@ -3628,6 +3805,16 @@
             document.getElementById('modal-profile-name').innerText = formattedName;
             document.getElementById('modal-profile-email').innerText = currentUser.email;
             document.getElementById('modal-profile-user').innerText = currentUser.username;
+            const idRow = document.getElementById('modal-profile-studentid-row');
+            if (idRow) {
+                if (currentUser.studentId) {
+                    document.getElementById('modal-profile-studentid').innerText = currentUser.studentId;
+                    idRow.classList.remove('hidden');
+                    idRow.classList.add('flex');
+                } else {
+                    idRow.classList.add('hidden');
+                }
+            }
             const roleEl = document.getElementById('modal-profile-role');
             const isAdmin = isAdminUser(currentUser);
             roleEl.innerText = isAdmin ? 'Admin' : (currentLang === 'si' ? 'ශිෂ්‍යයා' : 'Student');
@@ -4386,6 +4573,45 @@
             }
         }
 
+        // Reusable copy-to-clipboard helper: works with the modern Clipboard API where
+        // available, falls back to the older execCommand approach otherwise (some mobile
+        // in-app browsers / non-HTTPS contexts don't expose navigator.clipboard).
+        function copyToClipboard(text, btnEl) {
+            if (!text) return;
+            const flashCopied = () => {
+                showToast(currentLang === 'si' ? "අංකය Copy කරන ලදී!" : "Number copied!", 'success');
+                if (btnEl) {
+                    const icon = btnEl.querySelector('i');
+                    const prevClass = icon ? icon.className : null;
+                    if (icon) icon.className = 'fa-solid fa-check';
+                    setTimeout(() => { if (icon && prevClass) icon.className = prevClass; }, 1200);
+                }
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(flashCopied).catch(() => legacyCopyFallback(text, flashCopied));
+            } else {
+                legacyCopyFallback(text, flashCopied);
+            }
+        }
+
+        function legacyCopyFallback(text, onSuccess) {
+            try {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.focus();
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                onSuccess();
+            } catch (e) {
+                showToast(currentLang === 'si' ? "Copy කිරීම අසාර්ථකයි" : "Couldn't copy — please copy manually", 'error');
+            }
+        }
+
+
         function renderContactView() {
             const wa = document.getElementById('contact-whatsapp-link');
             const tg = document.getElementById('contact-telegram-link');
@@ -4561,7 +4787,7 @@
             openAdminMessageThread(viewedMessageThreadUsername);
         }
 
-        /* ============ MoraBot — RULE-BASED FAQ CHATBOT ============
+        /* ============ LabBot — RULE-BASED FAQ CHATBOT ============
            No external AI/API is used here on purpose: this file is a public static page
            hosted on Netlify, so any real API key baked into it could be read straight out
            of the page source and abused by anyone. Instead this matches the student's
@@ -4630,8 +4856,8 @@
             if (opening && !chatbotOpened) {
                 chatbotOpened = true;
                 appendChatbotMessage(currentLang === 'si'
-                    ? "ආයුබෝවන්! මම MoraBot 🤖 — App එක use කරන විදිහ ගැනත්, O/L Maths formula ගැනත් අහන්න. (මම simple keyword-based bot කෙනෙක් — සංකීර්ණ ප්‍රශ්නවලට Admin ගෙන් අහන්න.)"
-                    : "Hi! I'm MoraBot 🤖 — ask me about using the app, or basic O/L Maths formulas. (I'm a simple keyword bot — for anything complex, message the Admin!)",
+                    ? "ආයුබෝවන්! මම LabBot 🤖 — App එක use කරන විදිහ ගැනත්, O/L Maths formula ගැනත් අහන්න. (මම simple keyword-based bot කෙනෙක් — සංකීර්ණ ප්‍රශ්නවලට Admin ගෙන් අහන්න.)"
+                    : "Hi! I'm LabBot 🤖 — ask me about using the app, or basic O/L Maths formulas. (I'm a simple keyword bot — for anything complex, message the Admin!)",
                     'bot');
                 renderChatbotSuggestions();
             }
@@ -5177,7 +5403,7 @@
                 return `
                 <div class="flex items-center justify-between gap-3 bg-[#0f0c1a] border ${banned ? 'border-rose-800/60' : 'border-slate-800'} rounded-xl px-4 py-3">
                     <div class="min-w-0">
-                        <p class="text-xs font-bold text-white truncate">${escapeHtml(toTitleCase(u.fullname))} <span class="text-slate-500 font-normal">@${escapeHtml(u.username)}</span> ${banned ? '<span class="text-[9px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/30 px-1.5 py-0.5 rounded-md ml-1">BANNED</span>' : ''}${accessBadge}</p>
+                        <p class="text-xs font-bold text-white truncate">${escapeHtml(toTitleCase(u.fullname))} <span class="text-slate-500 font-normal">@${escapeHtml(u.username)}</span> ${u.studentId ? `<span class="text-[9px] font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/30 px-1.5 py-0.5 rounded-md ml-1">${escapeHtml(u.studentId)}</span>` : ''} ${banned ? '<span class="text-[9px] font-bold text-rose-400 bg-rose-500/10 border border-rose-500/30 px-1.5 py-0.5 rounded-md ml-1">BANNED</span>' : ''}${accessBadge}</p>
                         <p class="text-[10px] text-slate-500 truncate">${escapeHtml(u.email)} • ${stats.attempted} quizzes • ${stats.accuracy}% accuracy</p>
                     </div>
                     <div class="flex gap-1.5 shrink-0">
@@ -5222,6 +5448,11 @@
             document.getElementById('sp-modal-avatar').innerText = formattedName.charAt(0).toUpperCase();
             document.getElementById('sp-modal-name').innerText = formattedName;
             document.getElementById('sp-modal-email').innerText = student.email;
+            const spIdEl = document.getElementById('sp-modal-studentid');
+            if (spIdEl) {
+                if (student.studentId) { spIdEl.innerText = student.studentId; spIdEl.classList.remove('hidden'); }
+                else spIdEl.classList.add('hidden');
+            }
 
             const stats = computeUserStats(student);
             document.getElementById('sp-stat-attempted').innerText = stats.attempted;
