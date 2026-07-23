@@ -38,6 +38,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <style>
         body { font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; }
         ::-webkit-scrollbar { width: 8px; }
@@ -833,9 +834,20 @@
                     onReady: () => {
                         if (ytPendingVideoId) { ytPlayer.loadVideoById(ytPendingVideoId); ytPendingVideoId = null; }
                     },
+                    onStateChange: onYtPlayerStateChange,
                     onError: onYtPlayerError
                 }
             });
+        }
+
+        // Keeps the play/pause icon accurate for every real state change (not just ones
+        // triggered by our own buttons), and auto-advances to the next song when one ends
+        // — previously nothing listened for this, so playback would just stop silently.
+        function onYtPlayerStateChange(event) {
+            updateMiniPlayer();
+            if (event.data === YT.PlayerState.ENDED) {
+                songNextTrack();
+            }
         }
 
         // Required global callback name — the YouTube iframe_api script calls this itself
@@ -2488,6 +2500,7 @@
         let appInitialized = false;    // true once initApp() has run at least once (so early snapshots don't call renderers too soon)
         let cloudDocRef = null;
         let hasSyncedFromCloud = false; // true only once this device has actually reached the server at least once — until then, pushes are blocked so a fresh/offline device can't overwrite everyone else's real data with its empty local defaults
+        let authReadyPromise = null; // resolves once this device is signed in (even anonymously) — Firestore rules require this before allowing any read/write
         const CLOUD_SYNC_TIMEOUT_MS = 4000; // don't let a slow/offline connection block the app from loading
 
         function initFirebaseSync() {
@@ -2499,18 +2512,28 @@
                 firebase.initializeApp(firebaseConfig);
                 window.db = firebase.firestore();
                 cloudDocRef = db.collection('moramaths').doc('sharedState');
-                firebaseReady = true;
 
                 // Storage is used to host uploaded PDF files (worksheets, past papers, etc.) —
                 // separate from Firestore, which only stores small JSON-style app data.
                 try { window.pdfStorage = firebase.storage(); storageReady = true; }
                 catch (storageErr) { console.warn('Firebase Storage init failed — PDF uploads will be unavailable.', storageErr); storageReady = false; }
 
-                cloudDocRef.onSnapshot(doc => {
-                    if (!doc.metadata.fromCache) hasSyncedFromCloud = true;
-                    if (!doc.exists) return;
-                    applyCloudSnapshot(doc.data());
-                }, err => console.warn('Cloud sync listener error:', err));
+                // Anonymous sign-in — this doesn't identify a person, it just gives Firestore
+                // something to check (request.auth != null) before allowing access, so the
+                // shared data can't be read/written by a random script that only has the
+                // public firebaseConfig. This is separate from, and doesn't change, the app's
+                // own username/password login system used by students and admins.
+                authReadyPromise = firebase.auth().signInAnonymously().then(() => {
+                    firebaseReady = true;
+                    cloudDocRef.onSnapshot(doc => {
+                        if (!doc.metadata.fromCache) hasSyncedFromCloud = true;
+                        if (!doc.exists) return;
+                        applyCloudSnapshot(doc.data());
+                    }, err => console.warn('Cloud sync listener error:', err));
+                }).catch(err => {
+                    console.warn('Anonymous sign-in failed — running in local-only (this device only) mode.', err);
+                    firebaseReady = false;
+                });
             } catch (e) {
                 console.warn('Firebase init failed — running in local-only (this device only) mode.', e);
                 firebaseReady = false;
@@ -2620,7 +2643,7 @@
             const footerTag = document.getElementById('footer-version-tag');
             if (footerTag) footerTag.textContent = '· v' + APP_VERSION;
             initFirebaseSync();
-            if (!firebaseReady || !cloudDocRef) { initApp(); return; }
+            if (!cloudDocRef) { initApp(); return; }
 
             let started = false;
             const startOnce = (fromCloud) => {
@@ -2628,7 +2651,7 @@
                 started = true;
                 hideSyncOverlay();
                 if (!fromCloud) {
-                    console.warn('Starting with local data — cloud fetch never succeeded (offline/slow connection).');
+                    console.warn('Starting with local data — cloud fetch never succeeded (offline/slow connection, or sign-in failed).');
                     showToast(currentLang === 'si'
                         ? "⚠️ Internet එක දුර්වලයි — මෙම device එකේ පරණ/default data එකයි පේන්නේ. මෙතන කරන කිසිම වෙනසක් cloud එකට save වෙන්නේ නෑ connection එක hondin sambanda wena thek. Connection එක හොඳ උනාම refresh කරන්න."
                         : "⚠️ Weak/no connection — showing old/default local data. Nothing you do here will be saved to the cloud until you reconnect. Refresh once your connection is better.", 'error');
@@ -2642,7 +2665,10 @@
             function fetchCloudWithRetry(attempt) {
                 if (started) return;
                 showSyncOverlay(attempt, MAX_ATTEMPTS);
-                cloudDocRef.get({ source: 'server' }).then(doc => {
+                Promise.resolve(authReadyPromise).then(() => {
+                    if (!firebaseReady) throw new Error('Not signed in — cannot reach Firestore.');
+                    return cloudDocRef.get({ source: 'server' });
+                }).then(doc => {
                     if (doc.exists) applyCloudSnapshot(doc.data());
                     hasSyncedFromCloud = true;
                     startOnce(true);
