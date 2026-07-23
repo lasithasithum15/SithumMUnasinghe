@@ -48,7 +48,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <!-- Desmos Graphing Calculator (free embeddable API) — used by the in-app
          "Graphing Calculator" tool so students can plot algebra/geometry graphs. -->
-    <script src="https://www.desmos.com/api/v1.11/calculator.js?apiKey=dcb31709b452b1cf9dc26972add0fa6f"></script>
+    <script src="https://www.desmos.com/api/v1.11/calculator.js?apiKey=dcb31709b452b1cf9dc26972add0fda6"></script>
     <style>
         body { font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; }
         ::-webkit-scrollbar { width: 8px; }
@@ -148,7 +148,7 @@
     <script>
         /* Bump this on every meaningful release so it's easy to tell which build
            is running (shown in the nav badge, footer, and this console line). */
-        const APP_VERSION = "3.3.0";
+        const APP_VERSION = "3.4.0";
         console.log(`%cMathLab By Sithum Munasinghe v${APP_VERSION}`, 'color:#818cf8;font-weight:bold;font-size:12px;');
 
         /* Live clock shown on the student dashboard — updates every second. Safe to run
@@ -2579,6 +2579,11 @@
         let hasSyncedFromCloud = false; // true only once this device has actually reached the server at least once — until then, pushes are blocked so a fresh/offline device can't overwrite everyone else's real data with its empty local defaults
         let authReadyPromise = null; // resolves once this device is signed in (even anonymously) — Firestore rules require this before allowing any read/write
         const CLOUD_SYNC_TIMEOUT_MS = 4000; // don't let a slow/offline connection block the app from loading
+        // SECURITY: raw, unsanitized copy of the last users[] the cloud sent us — kept in memory
+        // ONLY (never persisted), so a logged-in student's browser can be scrubbed of everyone
+        // else's password hashes, while a fresh login attempt (own or a different account, e.g.
+        // right after logout in the same tab) can still verify credentials without a network round-trip.
+        let lastFullCloudUsers = null;
 
         function initFirebaseSync() {
             try {
@@ -2617,9 +2622,31 @@
             }
         }
 
+        // SECURITY: strips the `password` hash from every user record except the one
+        // belonging to `keepUsername` (typically the logged-in currentUser), and also
+        // strips other users' `email` when the viewer isn't an admin (students have no
+        // legitimate need to see each other's contact info; admins still see emails for
+        // managing/contacting students). Used so a logged-in user's browser never holds
+        // onto everyone else's sensitive fields for the rest of their session — only the
+        // credential-check moment at login itself (before currentUser exists) needs the
+        // full, unsanitized list.
+        function sanitizeUsersArray(list, keepUsername, isAdminViewer) {
+            if (!Array.isArray(list)) return list;
+            return list.map(u => {
+                if (u.username === keepUsername) return u;
+                const { password, ...rest } = u;
+                if (!isAdminViewer) delete rest.email;
+                return rest;
+            });
+        }
+
         function applyCloudSnapshot(data) {
             suppressCloudPush = true;
-            if (data.users) { users = data.users; localStorage.setItem('moramaths_users', JSON.stringify(users)); }
+            if (data.users) {
+                lastFullCloudUsers = data.users; // raw, in-memory only — see declaration above
+                users = currentUser ? sanitizeUsersArray(data.users, currentUser.username, isAdminUser(currentUser)) : data.users;
+                localStorage.setItem('moramaths_users', JSON.stringify(users));
+            }
             if (data.weeksData) { weeksData = data.weeksData; localStorage.setItem('moramaths_weeks', JSON.stringify(weeksData)); }
             if (data.zoomData) { zoomData = data.zoomData; localStorage.setItem('moramaths_zoom', JSON.stringify(zoomData)); }
             if (data.notifications) { notifications = data.notifications; localStorage.setItem('moramaths_notifications', JSON.stringify(notifications)); }
@@ -4101,6 +4128,8 @@
                 }
 
                 currentUser = found;
+                users = sanitizeUsersArray(users, currentUser.username, isAdminUser(currentUser));
+                localStorage.setItem('moramaths_users', JSON.stringify(users));
                 localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
                 showToast(currentLang === 'si' ? `සාදරයෙන් පිළිගනිමු, ${toTitleCase(currentUser.fullname)}!` : `Welcome back, ${toTitleCase(currentUser.fullname)}!`, 'success');
                 initApp();
@@ -4190,6 +4219,8 @@
                 localStorage.setItem('moramaths_users', JSON.stringify(users));
                 cloudPush();
                 currentUser = userRecord;
+                users = sanitizeUsersArray(users, currentUser.username, isAdminUser(currentUser));
+                localStorage.setItem('moramaths_users', JSON.stringify(users));
                 localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
                 closeOtpModal();
                 showToast(currentLang === 'si' ? "ලියාපදිංචිය සාර්ථකයි! 🎉" : "Registration Successful! 🎉", 'success');
@@ -4201,6 +4232,13 @@
         }
 
         function logout() {
+            // Restore the last full (unsanitized) cloud copy so the login screen can verify
+            // credentials for ANY account again — the in-memory `users` was scrubbed of
+            // other users' passwords while currentUser was logged in (see applyCloudSnapshot).
+            if (lastFullCloudUsers) {
+                users = lastFullCloudUsers;
+                localStorage.setItem('moramaths_users', JSON.stringify(users));
+            }
             currentUser = null;
             localStorage.removeItem('moramaths_current_user');
             stopFocusTrack();
@@ -4682,7 +4720,7 @@
            new-tab) keeps working unchanged whether the admin pasted a link OR uploaded
            a file. Files are hosted in Storage (not embedded as base64) so they don't
            blow past Firestore's 1MB-per-document limit and so larger PDFs are supported. */
-        function handlePdfFileSelect(inputEl, targetFieldId, labelId) {
+        function handlePdfFileSelect(inputEl, targetFieldId, labelId, folder) {
             const file = inputEl.files && inputEl.files[0];
             if (!file) return;
             const resetLabel = () => {
@@ -4709,7 +4747,7 @@
             }
             if (labelEl) labelEl.innerText = currentLang === 'si' ? 'Upload කරමින්... 0%' : 'Uploading... 0%';
             const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-            const path = `lesson-pdfs/${Date.now()}_${safeName}`;
+            const path = `${folder || 'lesson-pdfs'}/${Date.now()}_${safeName}`;
             const task = window.pdfStorage.ref(path).put(file, { contentType: 'application/pdf' });
             task.on('state_changed', (snap) => {
                 const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
@@ -4730,6 +4768,61 @@
                     showToast(currentLang === 'si' ? "PDF upload අසාර්ථකයි!" : "PDF upload failed!", 'error');
                 });
             });
+        }
+
+        /* ============ GENERIC IMAGE UPLOAD (Firebase Storage) ============
+           Reusable for any "paste an image URL" field in the admin panel — pass a
+           callback that receives the resulting download URL and does whatever that
+           field normally does with a pasted link (e.g. setWeekThumbnail). Keeping the
+           URL-paste field alongside this means admins can still use Google Drive/imgbb
+           links if they prefer, without being forced to upload through here. */
+        function handleImageFileSelect(inputEl, onUploaded, iconEl) {
+            const file = inputEl.files && inputEl.files[0];
+            if (!file) return;
+            const setSpinning = (spinning) => { if (iconEl) iconEl.className = spinning ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-upload'; };
+            if (!file.type.startsWith('image/')) {
+                showToast(currentLang === 'si' ? "කරුණාකර image file එකක් තෝරන්න." : "Please choose an image file.", 'error');
+                inputEl.value = '';
+                return;
+            }
+            const MAX_BYTES = 8 * 1024 * 1024; // 8MB — generous for thumbnails/banners
+            if (file.size > MAX_BYTES) {
+                showToast(currentLang === 'si' ? "Image එක ඉතා විශාලයි (8MB ට වඩා අඩුවෙන් තෝරන්න)." : "Image is too large (please choose under 8MB).", 'error');
+                inputEl.value = '';
+                return;
+            }
+            if (!storageReady || !window.pdfStorage) {
+                showToast(currentLang === 'si'
+                    ? "File upload සක්‍රීය කර නැත (Firebase Storage setup කර නොමැත). වෙනුවට Image Link එකක් paste කරන්න."
+                    : "File upload isn't enabled yet (Firebase Storage not set up). Please paste an image link instead for now.", 'error');
+                inputEl.value = '';
+                return;
+            }
+            setSpinning(true);
+            const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const path = `images/${Date.now()}_${safeName}`;
+            const task = window.pdfStorage.ref(path).put(file, { contentType: file.type });
+            task.on('state_changed', () => {}, (err) => {
+                console.warn('Image upload failed:', err);
+                setSpinning(false);
+                showToast(currentLang === 'si' ? "Image upload අසාර්ථකයි!" : "Image upload failed!", 'error');
+                inputEl.value = '';
+            }, () => {
+                task.snapshot.ref.getDownloadURL().then(url => {
+                    setSpinning(false);
+                    inputEl.value = '';
+                    onUploaded(url);
+                    showToast(currentLang === 'si' ? "Image upload කරන ලදී!" : "Image uploaded!", 'success');
+                }).catch(err => {
+                    console.warn('Failed to get image download URL:', err);
+                    setSpinning(false);
+                    showToast(currentLang === 'si' ? "Image upload අසාර්ථකයි!" : "Image upload failed!", 'error');
+                });
+            });
+        }
+
+        function handleWeekThumbnailUpload(inputEl, weekIdx) {
+            handleImageFileSelect(inputEl, (url) => setWeekThumbnail(weekIdx, url), inputEl.previousElementSibling);
         }
 
         /* ============ GOOGLE DRIVE LINK HELPER ============
@@ -5256,10 +5349,16 @@
                             </div>
                         `).join('') || '<p class="text-[10px] text-slate-600 italic">No papers yet.</p>'}
                     </div>
-                    <div class="flex gap-2">
+                    <div class="flex flex-col sm:flex-row gap-2">
                         <input type="text" id="paper-title-${y.year}" placeholder="Paper title (e.g. Model Paper 01)" class="flex-1 bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
-                        <input type="text" id="paper-pdf-${y.year}" placeholder="PDF link" class="flex-1 bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
-                        <button onclick="addPaperToYear(${y.year})" class="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold px-3 rounded-lg transition cursor-pointer">Add</button>
+                        <div class="flex-1 space-y-1">
+                            <input type="text" id="paper-pdf-${y.year}" placeholder="PDF link (Google Drive etc.)" class="w-full bg-[#161224] border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-white focus:outline-none focus:border-indigo-500">
+                            <label class="flex items-center gap-1.5 text-[9px] font-bold text-indigo-300 hover:text-indigo-200 cursor-pointer transition w-fit">
+                                <i class="fa-solid fa-upload"></i> <span id="paper-pdf-upload-label-${y.year}">or upload a PDF file</span>
+                                <input type="file" accept="application/pdf" class="hidden" onchange="handlePdfFileSelect(this, 'paper-pdf-${y.year}', 'paper-pdf-upload-label-${y.year}', 'past-papers')">
+                            </label>
+                        </div>
+                        <button onclick="addPaperToYear(${y.year})" class="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold px-3 py-2 sm:py-0 rounded-lg transition cursor-pointer shrink-0">Add</button>
                     </div>
                 </div>
             `).join('');
@@ -6099,6 +6198,10 @@
                             ${w.thumbnail ? `<img src="${escapeHtml(w.thumbnail)}" class="w-full h-full object-cover" onerror="this.style.display='none'">` : `<i class="fa-solid fa-image"></i>`}
                         </div>
                         <input value="${escapeHtml(w.thumbnail || '')}" onchange="setWeekThumbnail(${wi}, this.value)" placeholder="${currentLang === 'si' ? 'Thumbnail image link (URL) එකක් paste කරන්න...' : 'Paste thumbnail image URL...'}" class="bg-transparent text-[11px] text-slate-300 flex-1 min-w-0 focus:outline-none">
+                        <label title="${currentLang === 'si' ? 'Image upload කරන්න' : 'Upload image'}" class="shrink-0 w-7 h-7 rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition">
+                            <i class="fa-solid fa-upload"></i>
+                            <input type="file" accept="image/*" class="hidden" onchange="handleWeekThumbnailUpload(this, ${wi})">
+                        </label>
                         ${w.thumbnail ? `<button onclick="setWeekThumbnail(${wi}, '')" title="Remove thumbnail" class="shrink-0 w-6 h-6 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid fa-xmark"></i></button>` : ''}
                     </div>
                     <div class="space-y-1.5">
