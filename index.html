@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MathLab By Sithum Munasinghe - Advanced O/L Speed Revision & LMS Portal</title>
+    <!-- PWA: installable "Add to Home Screen" + offline app-shell caching (see sw.js) -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f0c1a">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="MathLab">
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -39,6 +46,9 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <!-- Desmos Graphing Calculator (free embeddable API) — used by the in-app
+         "Graphing Calculator" tool so students can plot algebra/geometry graphs. -->
+    <script src="https://www.desmos.com/api/v1.11/calculator.js?apiKey=dcb31709b452b1cf9dc26972add0fa6f"></script>
     <style>
         body { font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; }
         ::-webkit-scrollbar { width: 8px; }
@@ -138,7 +148,7 @@
     <script>
         /* Bump this on every meaningful release so it's easy to tell which build
            is running (shown in the nav badge, footer, and this console line). */
-        const APP_VERSION = "3.1.0";
+        const APP_VERSION = "3.3.0";
         console.log(`%cMathLab By Sithum Munasinghe v${APP_VERSION}`, 'color:#818cf8;font-weight:bold;font-size:12px;');
 
         /* Live clock shown on the student dashboard — updates every second. Safe to run
@@ -276,6 +286,7 @@
             closeSidebarOnMobile();
             if (which === 'leaderboard') { toggleLeaderboardView(); setSidebarActive('sidebar-link-leaderboard'); }
             else if (which === 'game') { toggleGameView(); setSidebarActive('sidebar-link-game'); }
+            else if (which === 'calculator') { openCalculator(); setSidebarActive('sidebar-link-calculator'); }
             else if (which === 'focus') { openFocusMode(); setSidebarActive('sidebar-link-focus'); }
             else if (which === 'schedule') { toggleScheduleView(); setSidebarActive('sidebar-link-schedule'); }
             else if (which === 'pastpapers') { togglePastPapersView(); setSidebarActive('sidebar-link-pastpapers'); }
@@ -298,6 +309,36 @@
             // the app doesn't interrupt the music or the countdown. A small floating mini
             // player (bottom-left) lets the user pause/stop it, or tap it to reopen this modal.
             updateMiniPlayer();
+        }
+
+        /* ============ GRAPHING CALCULATOR (Desmos API) ============ */
+        let desmosCalculatorInstance = null;
+        function openCalculator() {
+            document.getElementById('calculator-modal').classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+            if (typeof Desmos === 'undefined') {
+                document.getElementById('desmos-calculator-container').innerHTML =
+                    `<div class="h-full flex items-center justify-center text-center text-slate-500 text-xs p-6">${currentLang === 'si' ? 'Calculator එක load වීමට අන්තර්ජාල සම්බන්ධතාවයක් අවශ්‍යයි.' : 'An internet connection is needed to load the calculator.'}</div>`;
+                return;
+            }
+            if (!desmosCalculatorInstance) {
+                const elt = document.getElementById('desmos-calculator-container');
+                desmosCalculatorInstance = Desmos.GraphingCalculator(elt, {
+                    keypad: true,
+                    expressions: true,
+                    settingsMenu: true,
+                    zoomButtons: true,
+                    border: false
+                });
+            } else {
+                // Desmos sizes itself off the container's on-screen dimensions, which
+                // are zero while the modal is hidden — force a resize now that it's visible.
+                desmosCalculatorInstance.resize();
+            }
+        }
+        function closeCalculator() {
+            document.getElementById('calculator-modal').classList.add('hidden');
+            document.body.style.overflow = '';
         }
 
         function ensureFocusAudio() {
@@ -1116,6 +1157,7 @@
                 <div class="sidebar-link" id="sidebar-link-schedule" onclick="sidebarAction('schedule')"><i class="fa-solid fa-calendar-days w-4 text-center text-indigo-300"></i> <span id="txt-sidebar-schedule">Speed Revision 2026</span></div>
                 <div class="sidebar-link" id="sidebar-link-leaderboard" onclick="sidebarAction('leaderboard')"><i class="fa-solid fa-trophy w-4 text-center text-yellow-400"></i> <span id="txt-sidebar-leaderboard">Leaderboard</span></div>
                 <div class="sidebar-link" id="sidebar-link-game" onclick="sidebarAction('game')"><i class="fa-solid fa-gamepad w-4 text-center text-emerald-400"></i> <span id="txt-sidebar-game">Level Game</span></div>
+                <div class="sidebar-link" id="sidebar-link-calculator" onclick="sidebarAction('calculator')"><i class="fa-solid fa-calculator w-4 text-center text-cyan-400"></i> <span id="txt-sidebar-calculator">Graphing Calculator</span></div>
                 <div class="sidebar-link" id="sidebar-link-focus" onclick="sidebarAction('focus')">
                     <i class="fa-solid fa-brain w-4 text-center text-purple-400"></i> <span id="txt-sidebar-focus">Focus Mode</span>
                     <span id="sidebar-focus-live-dot" class="hidden w-1.5 h-1.5 rounded-full bg-emerald-400 ml-auto animate-pulse"></span>
@@ -1428,6 +1470,31 @@
                     <div id="goals-footer-box" class="bg-indigo-600/10 border border-indigo-500/30 p-3.5 rounded-2xl text-[11px] text-indigo-200">
                         <i class="fa-solid fa-circle-info mr-1 text-indigo-400"></i> අමතර ප්‍රශ්න පත්‍ර සහ Model Papers සඳහා පහත සති පරීක්ෂා කරන්න.
                     </div>
+                </div>
+            </div>
+
+            <!-- GAMIFICATION — XP/Level + Badges (quiz XP, daily-login XP, streak/quiz/accuracy badges) -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="bg-[#161224]/90 backdrop-blur-2xl border border-slate-800/80 p-6 rounded-3xl shadow-xl space-y-4">
+                    <h3 class="text-sm font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-bolt"></i> XP & Level</h3>
+                    <div class="flex items-center gap-4">
+                        <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shrink-0">
+                            <span id="xp-level-number" class="text-2xl font-black text-white">1</span>
+                        </div>
+                        <div class="flex-1 space-y-1.5 min-w-0">
+                            <div class="flex justify-between text-[11px] font-bold text-slate-300">
+                                <span id="xp-level-label">Level 1</span>
+                                <span id="xp-level-text">0 / 100 XP</span>
+                            </div>
+                            <div class="w-full bg-[#0f0c1a] h-2.5 rounded-full overflow-hidden border border-slate-800">
+                                <div id="xp-level-bar" class="bg-gradient-to-r from-indigo-500 to-purple-500 h-full rounded-full transition-all duration-500" style="width:0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="lg:col-span-2 bg-[#161224]/90 backdrop-blur-2xl border border-slate-800/80 p-6 rounded-3xl shadow-xl space-y-4">
+                    <h3 class="text-sm font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-medal"></i> Badges</h3>
+                    <div id="badges-grid" class="grid grid-cols-4 sm:grid-cols-4 gap-3"></div>
                 </div>
             </div>
         </div>
@@ -2323,6 +2390,16 @@
             </div>
         </div>
         </div>
+    </div>
+
+    <!-- GRAPHING CALCULATOR MODAL (Desmos API — free embeddable calculator for
+         algebra/geometry lessons) -->
+    <div id="calculator-modal" class="hidden fixed inset-0 z-[70] bg-[#0b0914] flex flex-col">
+        <div class="flex items-center justify-between px-4 sm:px-6 py-3.5 border-b border-slate-800 shrink-0">
+            <p class="text-xs sm:text-sm font-extrabold text-white flex items-center gap-2"><i class="fa-solid fa-calculator text-cyan-400"></i> <span id="calculator-modal-title">Graphing Calculator</span></p>
+            <button onclick="closeCalculator()" class="w-9 h-9 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer transition"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div id="desmos-calculator-container" class="flex-1 w-full"></div>
     </div>
 
     <!-- LESSON CODE VIEWER MODAL (Full-Screen) -->
@@ -3712,6 +3789,7 @@
             document.getElementById('leaderboard-back').innerText = t.leaderboardBack;
             document.getElementById('leaderboard-empty').innerText = t.leaderboardEmpty;
             document.getElementById('txt-sidebar-game').innerText = t.gameBtn;
+            document.getElementById('txt-sidebar-calculator').innerText = currentLang === 'si' ? 'ග්‍රැෆ් කැල්කියුලේටරය' : 'Graphing Calculator';
             document.getElementById('game-title').innerText = t.gameTitle;
             document.getElementById('game-sub').innerText = t.gameSub;
             document.getElementById('game-back').innerText = t.gameBack;
@@ -3782,6 +3860,8 @@
                 if (!u.gameProgress) u.gameProgress = { unlocked: 1, scores: {} };
                 if (!u.role) u.role = (u.username === 'admin') ? 'master_admin' : 'student';
                 if (!u.streak) u.streak = { count: 0, lastDate: '' };
+                if (u.xp === undefined) u.xp = 0;
+                if (!u.badges) u.badges = [];
                 if (!u.solvedPapers) u.solvedPapers = [];
                 if (u.banned === undefined) u.banned = false;
                 if (!u.studentId && !isAdminUser(u)) { u.studentId = generateStudentId(); assignedNewStudentIds = true; }
@@ -3814,6 +3894,8 @@
             if (currentUser && !currentUser.gameProgress) currentUser.gameProgress = { unlocked: 1, scores: {} };
             if (currentUser && !currentUser.role) currentUser.role = (currentUser.username === 'admin') ? 'master_admin' : 'student';
             if (currentUser && !currentUser.streak) currentUser.streak = { count: 0, lastDate: '' };
+            if (currentUser && currentUser.xp === undefined) currentUser.xp = 0;
+            if (currentUser && !currentUser.badges) currentUser.badges = [];
             if (!progressGraphConfig || typeof progressGraphConfig.scope === 'undefined') progressGraphConfig = { scope: 'all' };
         }
 
@@ -4054,7 +4136,7 @@
                 return;
             }
 
-            tempRegData = { fullname, email, username, password, quizScores: {}, paidUntil: null };
+            tempRegData = { fullname, email, username, password, quizScores: {}, paidUntil: null, xp: 0, badges: [] };
             const otpCode = generateOtpCode();
             tempRegData.otp = otpCode;
 
@@ -4167,6 +4249,7 @@
             }
             updateStudyStreak();
             renderGoals();
+            renderGamification();
         }
 
         /* ============ GOALS & ACHIEVEMENTS (admin selects the metric; values are auto-computed per student) ============ */
@@ -4243,6 +4326,7 @@
                 const idx = users.findIndex(u => u.username === currentUser.username);
                 if (idx !== -1) { users[idx].streak = currentUser.streak; localStorage.setItem('moramaths_users', JSON.stringify(users)); }
                 cloudPush();
+                awardXP(5, 'දිනපතා පිවිසීම', 'Daily login');
             }
             const box = document.getElementById('study-streak-text');
             const emoji = document.getElementById('study-streak-emoji');
@@ -4252,6 +4336,7 @@
                 box.innerText = label;
                 if (emoji) emoji.innerText = days >= 7 ? '🔥🔥' : days >= 3 ? '🔥' : '✨';
             }
+            checkAndAwardBadges();
         }
 
         /* Builds real progress-chart data from a user's actual quiz attempts
@@ -4854,6 +4939,124 @@
             return { attempted, totalCorrect, totalQuestions, accuracy };
         }
 
+        /* ============ GAMIFICATION: XP, LEVELS & BADGES ============ */
+        // Level formula: every 100 XP = 1 level. Kept simple/linear so students can
+        // predict how close they are to the next level from the progress bar alone.
+        function xpLevel(xp) { return Math.floor((xp || 0) / 100) + 1; }
+
+        const BADGES = [
+            { id: 'first_quiz', icon: 'fa-flag-checkered', color: 'emerald',
+              si: 'මුල් Quiz එක', en: 'First Quiz',
+              descSi: 'ඔබේ පළමු Quiz එක සම්පූර්ණ කළා', descEn: 'Completed your first quiz',
+              check: (u, s) => s.attempted >= 1 },
+            { id: 'perfect_score', icon: 'fa-star', color: 'amber',
+              si: 'පරිපූර්ණ ලකුණු', en: 'Perfect Score',
+              descSi: 'Quiz එකකින් 100% ලකුණු ලබාගත්තා', descEn: 'Scored 100% on a quiz',
+              check: (u) => Object.values(u.quizScores || {}).some(q => q.total > 0 && q.correct === q.total) },
+            { id: 'streak_3', icon: 'fa-fire', color: 'orange',
+              si: 'දින 3 දිනපෙළ', en: '3-Day Streak',
+              descSi: 'දින 3ක් අඛණ්ඩව login වුණා', descEn: 'Logged in 3 days in a row',
+              check: (u) => u.streak && u.streak.count >= 3 },
+            { id: 'streak_7', icon: 'fa-fire-flame-curved', color: 'orange',
+              si: 'දින 7 දිනපෙළ', en: '7-Day Streak',
+              descSi: 'දින 7ක් අඛණ්ඩව login වුණා', descEn: 'Logged in 7 days in a row',
+              check: (u) => u.streak && u.streak.count >= 7 },
+            { id: 'streak_30', icon: 'fa-fire-flame-simple', color: 'rose',
+              si: 'දින 30 දිනපෙළ', en: '30-Day Streak',
+              descSi: 'දින 30ක් අඛණ්ඩව login වුණා', descEn: 'Logged in 30 days in a row',
+              check: (u) => u.streak && u.streak.count >= 30 },
+            { id: 'quiz_master', icon: 'fa-graduation-cap', color: 'indigo',
+              si: 'Quiz මාස්ටර්', en: 'Quiz Master',
+              descSi: 'Quiz 10ක් සම්පූර්ණ කළා', descEn: 'Completed 10 quizzes',
+              check: (u, s) => s.attempted >= 10 },
+            { id: 'sharp_shooter', icon: 'fa-bullseye', color: 'cyan',
+              si: 'නිරවද්‍ය Shooter', en: 'Sharp Shooter',
+              descSi: 'Quiz 5කින් accuracy 90%+ පවත්වාගත්තා', descEn: '90%+ accuracy across 5+ quizzes',
+              check: (u, s) => s.attempted >= 5 && s.accuracy >= 90 },
+            { id: 'level_5', icon: 'fa-crown', color: 'purple',
+              si: 'Level 5', en: 'Level 5',
+              descSi: 'Level 5 කරා ළඟා වුණා', descEn: 'Reached Level 5',
+              check: (u) => xpLevel(u.xp) >= 5 }
+        ];
+
+        // Persists a single field on both the logged-in session copy and the shared
+        // users[] array (mirrors the pattern already used by submitQuiz/updateStudyStreak).
+        function persistCurrentUserField(field, value) {
+            if (!currentUser) return;
+            localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
+            const idx = users.findIndex(u => u.username === currentUser.username);
+            if (idx !== -1) {
+                users[idx][field] = value;
+                localStorage.setItem('moramaths_users', JSON.stringify(users));
+                cloudPush();
+            }
+        }
+
+        function awardXP(amount, reasonSi, reasonEn) {
+            if (!currentUser || !amount) return;
+            currentUser.xp = (currentUser.xp || 0) + amount;
+            persistCurrentUserField('xp', currentUser.xp);
+            const reason = currentLang === 'si' ? reasonSi : reasonEn;
+            showToast(`+${amount} XP${reason ? ' — ' + reason : ''}`, 'success');
+        }
+
+        // Re-checks every badge condition against the student's current stats and
+        // awards any newly-earned ones. Cheap enough to call after every quiz/login.
+        function checkAndAwardBadges() {
+            if (!currentUser) return;
+            if (!currentUser.badges) currentUser.badges = [];
+            const stats = computeUserStats(currentUser);
+            const newlyEarned = [];
+            BADGES.forEach(b => {
+                const already = currentUser.badges.some(x => x.id === b.id);
+                if (!already && b.check(currentUser, stats)) {
+                    currentUser.badges.push({ id: b.id, date: Date.now() });
+                    newlyEarned.push(b);
+                }
+            });
+            if (newlyEarned.length > 0) {
+                persistCurrentUserField('badges', currentUser.badges);
+                newlyEarned.forEach(b => {
+                    const name = currentLang === 'si' ? b.si : b.en;
+                    showToast(`🏅 ${currentLang === 'si' ? 'නව Badge එකක්: ' : 'New Badge: '}${name}`, 'success');
+                });
+                fireConfetti(40);
+            }
+            renderGamification();
+        }
+
+        function renderGamification() {
+            if (!currentUser) return;
+            const xp = currentUser.xp || 0;
+            const level = xpLevel(xp);
+            const xpIntoLevel = xp % 100;
+            const levelNumEl = document.getElementById('xp-level-number');
+            const levelLabelEl = document.getElementById('xp-level-label');
+            const levelTextEl = document.getElementById('xp-level-text');
+            const levelBarEl = document.getElementById('xp-level-bar');
+            if (levelNumEl) levelNumEl.innerText = level;
+            if (levelLabelEl) levelLabelEl.innerText = `Level ${level}`;
+            if (levelTextEl) levelTextEl.innerText = `${xpIntoLevel} / 100 XP`;
+            if (levelBarEl) levelBarEl.style.width = xpIntoLevel + '%';
+
+            const grid = document.getElementById('badges-grid');
+            if (grid) {
+                const earnedIds = (currentUser.badges || []).map(b => b.id);
+                grid.innerHTML = BADGES.map(b => {
+                    const earned = earnedIds.includes(b.id);
+                    const name = currentLang === 'si' ? b.si : b.en;
+                    const desc = currentLang === 'si' ? b.descSi : b.descEn;
+                    return `
+                        <div title="${escapeHtml(desc)}" class="flex flex-col items-center text-center gap-1.5 p-3 rounded-2xl border transition ${earned ? `bg-${b.color}-500/10 border-${b.color}-500/40` : 'bg-[#0f0c1a] border-slate-800 opacity-40'}">
+                            <div class="w-10 h-10 rounded-xl flex items-center justify-center ${earned ? `bg-${b.color}-500/20 text-${b.color}-400` : 'bg-slate-800 text-slate-600'}">
+                                <i class="fa-solid ${b.icon}"></i>
+                            </div>
+                            <span class="text-[9px] font-bold leading-tight ${earned ? 'text-slate-200' : 'text-slate-600'}">${escapeHtml(name)}</span>
+                        </div>`;
+                }).join('');
+            }
+        }
+
         function renderLeaderboard() {
             const list = document.getElementById('leaderboard-list');
             const empty = document.getElementById('leaderboard-empty');
@@ -4923,6 +5126,7 @@
                 // Chart.js sizes itself off the canvas's on-screen dimensions, which are
                 // zero while its container is hidden — re-render now that it's visible.
                 if (currentUser && !isAdminUser(currentUser)) renderChart();
+                renderGamification();
             } else {
                 progressSec.classList.add('hidden');
                 showHomeSection();
@@ -5871,6 +6075,9 @@
                 </div>`;
             showToast(`${t.quizResultPrefix} ${correct}/${total}`, correct === total ? 'success' : 'info');
             if (total > 0 && correct === total) fireConfetti(50);
+            const xpGain = correct * 10 + ((total > 0 && correct === total) ? 20 : 0);
+            if (xpGain > 0) awardXP(xpGain, 'Quiz සම්පූර්ණ කිරීම', 'Completing the quiz');
+            checkAndAwardBadges();
             if (document.getElementById('studentProgressChart')) renderChart();
         }
 
@@ -6230,7 +6437,7 @@
             if (users.some(u => u.username.toLowerCase() === username)) { showToast("Username already in use", 'error'); return; }
             if (users.some(u => u.email.toLowerCase() === emailInput)) { showToast("Email already in use", 'error'); return; }
             const hashedPassword = await sha256Hex(password);
-            users.push({ fullname, email: emailInput, username, password: hashedPassword, role: 'admin', quizScores: {}, gameProgress: { unlocked: 1, scores: {} } });
+            users.push({ fullname, email: emailInput, username, password: hashedPassword, role: 'admin', quizScores: {}, gameProgress: { unlocked: 1, scores: {} }, xp: 0, badges: [] });
             localStorage.setItem('moramaths_users', JSON.stringify(users));
             cloudPush();
             document.getElementById('new-admin-name').value = '';
@@ -6355,6 +6562,19 @@
         }
 
         window.onload = bootstrapApp;
+
+        // PWA: register the service worker so the app shell can be served from
+        // cache on flaky connections, and the browser offers "Add to Home Screen".
+        // Only works over http/https (not file://) and requires sw.js/manifest.json
+        // to sit alongside this index.html when hosted.
+        if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(() => {
+                    // Silently ignore — e.g. sw.js not uploaded yet, or hosting doesn't allow it.
+                    // The app works fully online-only without it.
+                });
+            });
+        }
     </script>
 </body>
 </html>
