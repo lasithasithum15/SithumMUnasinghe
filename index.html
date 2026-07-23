@@ -2695,6 +2695,28 @@
             if (appInitialized) refreshUIAfterCloudSync();
         }
 
+        // Firestore's set()/update() throws synchronously — not a rejected promise — the
+        // instant it finds an explicit `undefined` anywhere in the data, even nested. That
+        // throw happens before the network call, so every line of code written after the
+        // cloudPush() call in whichever function called it (re-rendering the list, showing
+        // a success toast, etc.) never runs, and the write itself never reaches the server.
+        // This made admin actions (remove student, add a paper, etc.) look like they "did
+        // nothing" even though part of the work had already happened locally. This helper
+        // recursively drops any key whose value is undefined so a payload can never trigger
+        // that throw, no matter which field it came from.
+        function stripUndefinedDeep(value) {
+            if (Array.isArray(value)) return value.map(stripUndefinedDeep);
+            if (value && typeof value === 'object' && !(value instanceof Date)) {
+                const out = {};
+                for (const key in value) {
+                    if (value[key] === undefined) continue;
+                    out[key] = stripUndefinedDeep(value[key]);
+                }
+                return out;
+            }
+            return value;
+        }
+
         function cloudPush() {
             if (!firebaseReady || suppressCloudPush || !cloudDocRef) return;
             if (!hasSyncedFromCloud) { console.warn('Cloud push skipped — this device has not confirmed a cloud sync yet (would risk overwriting real data with local defaults).'); return; }
@@ -2706,27 +2728,37 @@
             // exactly what was locking other students out on a second device. Patch the
             // missing fields back in from the last full copy the cloud sent us before
             // sending — every other field (ban status, access dates, admin edits, etc.)
-            // still comes from the local copy, so admin changes are never lost.
+            // still comes from the local copy, so admin changes are never lost. If neither
+            // copy has a real value (e.g. that password was already lost to the earlier
+            // bug), the key is left out entirely rather than set to undefined.
             let usersToPush = users;
             if (currentUser && lastFullCloudUsers) {
                 const cloudByUsername = new Map(lastFullCloudUsers.map(u => [u.username, u]));
                 usersToPush = users.map(u => {
                     if (u.username === currentUser.username) return u;
-                    if (u.password !== undefined && u.email !== undefined) return u; // nothing stripped on this record
                     const cloudVersion = cloudByUsername.get(u.username);
-                    if (!cloudVersion) return u; // brand new local user the cloud doesn't know about yet — nothing to restore
-                    return {
-                        ...u,
-                        password: u.password !== undefined ? u.password : cloudVersion.password,
-                        email: u.email !== undefined ? u.email : cloudVersion.email
-                    };
+                    const patched = { ...u };
+                    if (patched.password === undefined) {
+                        if (cloudVersion && cloudVersion.password !== undefined) patched.password = cloudVersion.password;
+                        else delete patched.password;
+                    }
+                    if (patched.email === undefined) {
+                        if (cloudVersion && cloudVersion.email !== undefined) patched.email = cloudVersion.email;
+                        else delete patched.email;
+                    }
+                    return patched;
                 });
             }
-            cloudDocRef.set({
+            const payload = stripUndefinedDeep({
                 users: usersToPush, weeksData, zoomData, notifications, siteAssets, progressGraphConfig, goalsData,
                 pastPapersData, contactData, studentMessages, songPlaylists, nextStudentIdSeq,
                 updatedAt: Date.now()
-            }, { merge: true }).catch(err => console.warn('Cloud sync push failed:', err));
+            });
+            try {
+                cloudDocRef.set(payload, { merge: true }).catch(err => console.warn('Cloud sync push failed:', err));
+            } catch (err) {
+                console.warn('Cloud sync push failed (invalid data):', err);
+            }
         }
 
         function refreshUIAfterCloudSync() {
