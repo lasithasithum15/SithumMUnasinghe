@@ -2487,6 +2487,7 @@
         let suppressCloudPush = false; // true while we're applying an incoming cloud update, so we don't immediately re-push it
         let appInitialized = false;    // true once initApp() has run at least once (so early snapshots don't call renderers too soon)
         let cloudDocRef = null;
+        let hasSyncedFromCloud = false; // true only once this device has actually reached the server at least once — until then, pushes are blocked so a fresh/offline device can't overwrite everyone else's real data with its empty local defaults
         const CLOUD_SYNC_TIMEOUT_MS = 4000; // don't let a slow/offline connection block the app from loading
 
         function initFirebaseSync() {
@@ -2506,6 +2507,7 @@
                 catch (storageErr) { console.warn('Firebase Storage init failed — PDF uploads will be unavailable.', storageErr); storageReady = false; }
 
                 cloudDocRef.onSnapshot(doc => {
+                    if (!doc.metadata.fromCache) hasSyncedFromCloud = true;
                     if (!doc.exists) return;
                     applyCloudSnapshot(doc.data());
                 }, err => console.warn('Cloud sync listener error:', err));
@@ -2568,6 +2570,7 @@
 
         function cloudPush() {
             if (!firebaseReady || suppressCloudPush || !cloudDocRef) return;
+            if (!hasSyncedFromCloud) { console.warn('Cloud push skipped — this device has not confirmed a cloud sync yet (would risk overwriting real data with local defaults).'); return; }
             cloudDocRef.set({
                 users, weeksData, zoomData, notifications, siteAssets, progressGraphConfig, goalsData,
                 pastPapersData, contactData, studentMessages, songPlaylists, nextStudentIdSeq,
@@ -2627,8 +2630,8 @@
                 if (!fromCloud) {
                     console.warn('Starting with local data — cloud fetch never succeeded (offline/slow connection).');
                     showToast(currentLang === 'si'
-                        ? "⚠️ Internet එක දුර්වලයි — මෙම device එකේ save වෙච්ච data එකයි පේන්නේ. Connection එක හොඳ උනාම refresh කරන්න."
-                        : "⚠️ Weak/no connection — showing this device's local data. Refresh once your connection is better.", 'error');
+                        ? "⚠️ Internet එක දුර්වලයි — මෙම device එකේ පරණ/default data එකයි පේන්නේ. මෙතන කරන කිසිම වෙනසක් cloud එකට save වෙන්නේ නෑ connection එක hondin sambanda wena thek. Connection එක හොඳ උනාම refresh කරන්න."
+                        : "⚠️ Weak/no connection — showing old/default local data. Nothing you do here will be saved to the cloud until you reconnect. Refresh once your connection is better.", 'error');
                 }
                 initApp();
             };
@@ -2641,6 +2644,7 @@
                 showSyncOverlay(attempt, MAX_ATTEMPTS);
                 cloudDocRef.get({ source: 'server' }).then(doc => {
                     if (doc.exists) applyCloudSnapshot(doc.data());
+                    hasSyncedFromCloud = true;
                     startOnce(true);
                 }).catch(err => {
                     console.warn(`Initial cloud fetch failed (attempt ${attempt}/${MAX_ATTEMPTS}):`, err);
