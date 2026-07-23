@@ -2698,8 +2698,32 @@
         function cloudPush() {
             if (!firebaseReady || suppressCloudPush || !cloudDocRef) return;
             if (!hasSyncedFromCloud) { console.warn('Cloud push skipped — this device has not confirmed a cloud sync yet (would risk overwriting real data with local defaults).'); return; }
+            // CRITICAL: the in-memory users[] on a logged-in device has every OTHER
+            // user's password (and, for non-admins, email) stripped out for privacy —
+            // see sanitizeUsersArray(). Pushing that array as-is would permanently wipe
+            // everyone else's password from the shared cloud data on the very next save
+            // (quiz submitted, message sent, anything that calls cloudPush()), which is
+            // exactly what was locking other students out on a second device. Patch the
+            // missing fields back in from the last full copy the cloud sent us before
+            // sending — every other field (ban status, access dates, admin edits, etc.)
+            // still comes from the local copy, so admin changes are never lost.
+            let usersToPush = users;
+            if (currentUser && lastFullCloudUsers) {
+                const cloudByUsername = new Map(lastFullCloudUsers.map(u => [u.username, u]));
+                usersToPush = users.map(u => {
+                    if (u.username === currentUser.username) return u;
+                    if (u.password !== undefined && u.email !== undefined) return u; // nothing stripped on this record
+                    const cloudVersion = cloudByUsername.get(u.username);
+                    if (!cloudVersion) return u; // brand new local user the cloud doesn't know about yet — nothing to restore
+                    return {
+                        ...u,
+                        password: u.password !== undefined ? u.password : cloudVersion.password,
+                        email: u.email !== undefined ? u.email : cloudVersion.email
+                    };
+                });
+            }
             cloudDocRef.set({
-                users, weeksData, zoomData, notifications, siteAssets, progressGraphConfig, goalsData,
+                users: usersToPush, weeksData, zoomData, notifications, siteAssets, progressGraphConfig, goalsData,
                 pastPapersData, contactData, studentMessages, songPlaylists, nextStudentIdSeq,
                 updatedAt: Date.now()
             }, { merge: true }).catch(err => console.warn('Cloud sync push failed:', err));
@@ -4755,7 +4779,7 @@
             }, (err) => {
                 console.warn('PDF upload failed:', err);
                 resetLabel();
-                showToast(currentLang === 'si' ? "PDF upload අසාර්ථකයි!" : "PDF upload failed!", 'error');
+                showToast((currentLang === 'si' ? "PDF upload අසාර්ථකයි: " : "PDF upload failed: ") + (err && err.code ? err.code : (err && err.message) || 'unknown error'), 'error');
                 inputEl.value = '';
             }, () => {
                 task.snapshot.ref.getDownloadURL().then(url => {
@@ -4765,7 +4789,7 @@
                 }).catch(err => {
                     console.warn('Failed to get PDF download URL:', err);
                     resetLabel();
-                    showToast(currentLang === 'si' ? "PDF upload අසාර්ථකයි!" : "PDF upload failed!", 'error');
+                    showToast((currentLang === 'si' ? "PDF upload අසාර්ථකයි: " : "PDF upload failed: ") + (err && err.code ? err.code : 'unknown error'), 'error');
                 });
             });
         }
@@ -4805,7 +4829,7 @@
             task.on('state_changed', () => {}, (err) => {
                 console.warn('Image upload failed:', err);
                 setSpinning(false);
-                showToast(currentLang === 'si' ? "Image upload අසාර්ථකයි!" : "Image upload failed!", 'error');
+                showToast((currentLang === 'si' ? "Image upload අසාර්ථකයි: " : "Image upload failed: ") + (err && err.code ? err.code : (err && err.message) || 'unknown error'), 'error');
                 inputEl.value = '';
             }, () => {
                 task.snapshot.ref.getDownloadURL().then(url => {
@@ -4816,7 +4840,7 @@
                 }).catch(err => {
                     console.warn('Failed to get image download URL:', err);
                     setSpinning(false);
-                    showToast(currentLang === 'si' ? "Image upload අසාර්ථකයි!" : "Image upload failed!", 'error');
+                    showToast((currentLang === 'si' ? "Image upload අසාර්ථකයි: " : "Image upload failed: ") + (err && err.code ? err.code : 'unknown error'), 'error');
                 });
             });
         }
