@@ -70,12 +70,6 @@
         .rank-3 { background: linear-gradient(135deg,#b45309,#d97706); }
         [contenteditable="true"]:focus { outline: 1px dashed rgba(99,102,241,0.6); outline-offset: 3px; border-radius: 6px; }
         #auth-hero-panel { display: none; }
-        .calc-btn-num { background: #0f0c1a; border: 1px solid #1e293b; color: #fff; padding: 10px 0; border-radius: 10px; cursor: pointer; transition: 0.15s; }
-        .calc-btn-num:hover { background: #1e1b2e; border-color: #6366f1; }
-        .calc-btn-op { background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.3); color: #a5b4fc; padding: 10px 0; border-radius: 10px; cursor: pointer; transition: 0.15s; }
-        .calc-btn-op:hover { background: rgba(99,102,241,0.3); color: #fff; }
-        .calc-btn-fn { background: #161224; border: 1px solid #1e293b; color: #94a3b8; padding: 8px 0; border-radius: 10px; cursor: pointer; font-size: 10px; transition: 0.15s; }
-        .calc-btn-fn:hover { background: #1e1b2e; color: #fff; border-color: #6366f1; }
         @media (min-width: 1024px) {
             #auth-hero-panel.hero-visible { display: flex; }
         }
@@ -207,67 +201,24 @@
         // Powers the Admin quick-jump sidebar: the admin panel is one long page of
         // cards, so this just smooth-scrolls straight to the section the admin picked
         // instead of them having to scroll through everything manually.
-        function renderAdminStatsOverview() {
-            const students = users.filter(u => !isAdminUser(u));
-            const totalLessons = weeksData.reduce((sum, w) => sum + w.lessons.length, 0);
-            const unlockedWeeks = weeksData.filter(w => !w.isLocked).length;
-            const unreadMsgs = Object.values(studentMessages || {}).reduce((sum, thread) =>
-                sum + thread.filter(m => m.from === 'student' && !m.readByAdmin).length, 0);
-            const quizAttempts = students.reduce((sum, u) => sum + Object.keys(u.quizScores || {}).length, 0);
-
-            const set = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
-            set('stat-total-students', students.length);
-            set('stat-total-lessons', totalLessons);
-            set('stat-unlocked-weeks', `${unlockedWeeks}/${weeksData.length}`);
-            set('stat-unread-messages', unreadMsgs);
-            set('stat-quiz-attempts', quizAttempts);
-            set('stat-announcements', notifications.length);
-        }
-
-        // Admin panel sections: only one is visible at a time (picked from the sidebar),
-        // instead of one long page with everything stacked — keeps the admin dashboard clean.
-        function showAdminSection(key) {
+        function scrollToAdminSection(anchorId) {
             closeSidebarOnMobile();
-            document.querySelectorAll('#admin-panel .admin-section').forEach(el => el.classList.add('hidden'));
-            const target = document.querySelector(`#admin-panel .admin-section[data-section="${key}"]`);
-            if (target) target.classList.remove('hidden');
-            document.querySelectorAll('.admin-nav-link').forEach(link => {
-                link.classList.toggle('active', link.dataset.section === key);
-            });
-            const main = document.querySelector('#admin-panel').closest('main') || document.querySelector('main');
-            if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-
-        // All the toggleable full-width sections that share the same "one at a time"
-        // display area below the sidebar. Keeping this list in one place means every
-        // section-toggle function (and the dashboard "home" link) stays in sync
-        // automatically when a new section is added.
-        const MAIN_SECTION_IDS = ['leaderboard-section', 'schedule-section', 'game-section', 'pastpapers-section', 'contact-section', 'progress-section'];
-        function hideAllMainSections() {
-            MAIN_SECTION_IDS.forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.classList.add('hidden');
-            });
-            const dash = document.getElementById('student-dashboard');
-            const admin = document.getElementById('admin-panel');
-            if (dash) dash.classList.add('hidden');
-            if (admin) admin.classList.add('hidden');
-        }
-        // Shows the student dashboard, or the admin panel if the logged-in user is an admin.
-        function showHomeSection() {
-            if (currentUser && isAdminUser(currentUser)) {
-                const admin = document.getElementById('admin-panel');
-                if (admin) admin.classList.remove('hidden');
-            } else {
-                const dash = document.getElementById('student-dashboard');
-                if (dash) dash.classList.remove('hidden');
-            }
+            const el = document.getElementById(anchorId);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
 
         function sidebarGoDashboard() {
             closeSidebarOnMobile();
-            hideAllMainSections();
-            showHomeSection();
+            const board = document.getElementById('leaderboard-section');
+            const gameSec = document.getElementById('game-section');
+            const scheduleSec = document.getElementById('schedule-section');
+            const papersSec = document.getElementById('pastpapers-section');
+            const contactSec = document.getElementById('contact-section');
+            if (board && !board.classList.contains('hidden')) toggleLeaderboardView();
+            if (gameSec && !gameSec.classList.contains('hidden')) toggleGameView();
+            if (scheduleSec && !scheduleSec.classList.contains('hidden')) toggleScheduleView();
+            if (papersSec && !papersSec.classList.contains('hidden')) togglePastPapersView();
+            if (contactSec && !contactSec.classList.contains('hidden')) toggleContactView();
             setSidebarActive('sidebar-link-dashboard');
         }
 
@@ -279,7 +230,6 @@
             else if (which === 'schedule') { toggleScheduleView(); setSidebarActive('sidebar-link-schedule'); }
             else if (which === 'pastpapers') { togglePastPapersView(); setSidebarActive('sidebar-link-pastpapers'); }
             else if (which === 'contact') { toggleContactView(); setSidebarActive('sidebar-link-contact'); }
-            else if (which === 'progress') { toggleProgressView(); setSidebarActive('sidebar-link-progress'); }
         }
 
         function openFocusMode() {
@@ -331,20 +281,7 @@
             const nowPlayingLabel = document.getElementById('focus-nowplaying-label');
             if (!bar) return;
             const focusModalOpen = !document.getElementById('focus-mode-modal').classList.contains('hidden');
-            const isSongMode = !!currentPlayingSongTitle;
             const label = focusCurrentTrack ? (focusTrackLabels[focusCurrentTrack] || focusCurrentTrack) : (currentPlayingSongTitle || null);
-
-            // Play/pause icon: ambient uses the AudioContext's suspended state,
-            // songs use the YouTube player's own state (1 = playing).
-            let isPaused = false;
-            if (focusCurrentTrack) isPaused = focusAudioCtx && focusAudioCtx.state === 'suspended';
-            else if (isSongMode && ytPlayer && typeof ytPlayer.getPlayerState === 'function') {
-                try { isPaused = ytPlayer.getPlayerState() !== 1; } catch (e) {}
-            }
-            const iconClass = isPaused ? 'fa-solid fa-play' : 'fa-solid fa-pause';
-            const miniIcon = document.getElementById('focus-mini-playpause-icon');
-            if (miniIcon) miniIcon.className = iconClass;
-
             if (label && !focusModalOpen) {
                 document.getElementById('focus-mini-track-name').innerText = label;
                 bar.classList.remove('hidden');
@@ -352,9 +289,10 @@
                 bar.classList.add('hidden');
             }
             if (topBar) {
-                if (label) {
+                if (focusCurrentTrack) {
                     document.getElementById('focus-top-track-name').innerText = label;
-                    document.getElementById('focus-top-icon').className = iconClass;
+                    const isPaused = focusAudioCtx && focusAudioCtx.state === 'suspended';
+                    document.getElementById('focus-top-icon').className = isPaused ? 'fa-solid fa-play' : 'fa-solid fa-pause';
                     topBar.classList.remove('hidden');
                 } else {
                     topBar.classList.add('hidden');
@@ -814,7 +752,6 @@
         let ytPendingVideoId = null;
         let ytPendingTitle = '';
         let currentPlayingSongTitle = null; // shown in the mini-player when Focus Mode is closed but a song is still playing in the background
-        let currentPlayingSongId = null;
 
         function loadYouTubeIframeAPI() {
             if (window.YT && window.YT.Player) { ytApiReady = true; if (!ytPlayer) createYtPlayer(); return; }
@@ -869,7 +806,6 @@
             if (errBox) errBox.classList.add('hidden');
             if (titleEl) titleEl.innerText = song.title || (currentLang === 'si' ? 'ගීතය' : 'Song');
             currentPlayingSongTitle = song.title || (currentLang === 'si' ? 'ගීතය' : 'Song');
-            currentPlayingSongId = song.id;
             wrap.classList.remove('hidden');
             loadYouTubeIframeAPI();
             if (ytApiReady && ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
@@ -880,38 +816,6 @@
             updateMiniPlayer();
         }
 
-        function songNextTrack() {
-            const list = songPlaylists[activeSongLang] || [];
-            if (!list.length) return;
-            const idx = list.findIndex(s => s.id === currentPlayingSongId);
-            const next = list[(idx + 1 + list.length) % list.length];
-            playSongPlaylistItem(next.id);
-        }
-
-        function songPrevTrack() {
-            const list = songPlaylists[activeSongLang] || [];
-            if (!list.length) return;
-            const idx = list.findIndex(s => s.id === currentPlayingSongId);
-            const prev = list[(idx - 1 + list.length) % list.length];
-            playSongPlaylistItem(prev.id);
-        }
-
-        function toggleSongPlayPause() {
-            if (!ytPlayer || typeof ytPlayer.getPlayerState !== 'function') return;
-            try {
-                const state = ytPlayer.getPlayerState(); // 1 = playing
-                if (state === 1) ytPlayer.pauseVideo(); else ytPlayer.playVideo();
-            } catch (e) { /* player not ready */ }
-            setTimeout(updateMiniPlayer, 150);
-        }
-
-        /* Generic controls used by the mini-player / top indicator — delegate to
-           whichever is currently active: an ambient Focus sound, or a playlist song. */
-        function miniPlayerNext() { if (currentPlayingSongTitle) songNextTrack(); else if (focusCurrentTrack) focusNextTrack(); }
-        function miniPlayerPrev() { if (currentPlayingSongTitle) songPrevTrack(); else if (focusCurrentTrack) focusPrevTrack(); }
-        function miniPlayerTogglePlayPause() { if (currentPlayingSongTitle) toggleSongPlayPause(); else if (focusCurrentTrack) toggleFocusPlayPause(); }
-        function miniPlayerStop() { stopFocusTrack(); stopSongPlayer(); }
-
         function stopSongPlayer() {
             const wrap = document.getElementById('song-player-wrap');
             if (!wrap) return;
@@ -920,7 +824,6 @@
             }
             ytPendingVideoId = null;
             currentPlayingSongTitle = null;
-            currentPlayingSongId = null;
             wrap.classList.add('hidden');
             updateMiniPlayer();
         }
@@ -1100,7 +1003,6 @@
         <div class="flex-1 overflow-y-auto py-4 px-3 space-y-1">
             <div id="student-sidebar-links" class="space-y-1">
                 <div class="sidebar-link active" id="sidebar-link-dashboard" onclick="sidebarGoDashboard()"><i class="fa-solid fa-house w-4 text-center"></i> <span id="txt-sidebar-dashboard">Dashboard</span></div>
-                <div class="sidebar-link" id="sidebar-link-progress" onclick="sidebarAction('progress')"><i class="fa-solid fa-chart-line w-4 text-center text-fuchsia-400"></i> <span id="txt-sidebar-progress">My Progress</span></div>
                 <div class="sidebar-link" id="sidebar-link-schedule" onclick="sidebarAction('schedule')"><i class="fa-solid fa-calendar-days w-4 text-center text-indigo-300"></i> <span id="txt-sidebar-schedule">Speed Revision 2026</span></div>
                 <div class="sidebar-link" id="sidebar-link-leaderboard" onclick="sidebarAction('leaderboard')"><i class="fa-solid fa-trophy w-4 text-center text-yellow-400"></i> <span id="txt-sidebar-leaderboard">Leaderboard</span></div>
                 <div class="sidebar-link" id="sidebar-link-game" onclick="sidebarAction('game')"><i class="fa-solid fa-gamepad w-4 text-center text-emerald-400"></i> <span id="txt-sidebar-game">Level Game</span></div>
@@ -1121,22 +1023,21 @@
                  .master-admin-only class so they hide automatically for regular admins. -->
             <div id="admin-sidebar-links" class="hidden space-y-1">
                 <p class="sidebar-section-label" id="txt-sidebar-admin-controls">Controls</p>
-                <div class="sidebar-link admin-nav-link" data-section="dashboard" onclick="showAdminSection('dashboard')"><i class="fa-solid fa-gauge w-4 text-center text-indigo-300"></i> <span>Dashboard</span></div>
-                <div class="sidebar-link admin-nav-link" data-section="zoom" onclick="showAdminSection('zoom')"><i class="fa-solid fa-video w-4 text-center text-rose-400"></i> <span>Zoom Class</span></div>
-                <div class="sidebar-link admin-nav-link" data-section="lessons" onclick="showAdminSection('lessons')"><i class="fa-solid fa-book-medical w-4 text-center text-indigo-300"></i> <span>Add Lesson</span></div>
-                <div class="sidebar-link admin-nav-link" data-section="weeks" onclick="showAdminSection('weeks')"><i class="fa-solid fa-layer-group w-4 text-center text-indigo-300"></i> <span>Weeks & Lessons</span></div>
-                <div class="sidebar-link admin-nav-link" data-section="quizbuilder" onclick="showAdminSection('quizbuilder')"><i class="fa-solid fa-circle-question w-4 text-center text-indigo-300"></i> <span>Quiz Builder</span></div>
-                <div class="sidebar-link admin-nav-link" data-section="students" onclick="showAdminSection('students')"><i class="fa-solid fa-users w-4 text-center text-emerald-400"></i> <span>Students</span></div>
-                <div class="sidebar-link admin-nav-link" data-section="messages" onclick="showAdminSection('messages')"><i class="fa-solid fa-comments w-4 text-center text-emerald-400"></i> <span>Messages</span></div>
-                <div class="sidebar-link admin-nav-link" data-section="announce" onclick="showAdminSection('announce')"><i class="fa-solid fa-bullhorn w-4 text-center text-purple-400"></i> <span>Announcements</span></div>
-                <div class="sidebar-link admin-nav-link" data-section="graph" onclick="showAdminSection('graph')"><i class="fa-solid fa-chart-line w-4 text-center text-purple-400"></i> <span>Progress Graph</span></div>
-                <div class="sidebar-link admin-nav-link" data-section="goals" onclick="showAdminSection('goals')"><i class="fa-solid fa-bullseye w-4 text-center text-purple-400"></i> <span>Goals</span></div>
-                <div class="sidebar-link admin-nav-link" data-section="pastpapers-admin" onclick="showAdminSection('pastpapers-admin')"><i class="fa-solid fa-file-lines w-4 text-center text-sky-400"></i> <span>Past Papers</span></div>
-                <div class="sidebar-link admin-nav-link" data-section="songs" onclick="showAdminSection('songs')"><i class="fa-brands fa-youtube w-4 text-center text-sky-400"></i> <span>Song Playlists</span></div>
-                <div class="sidebar-link admin-nav-link master-admin-only hidden" data-section="contact-settings" onclick="showAdminSection('contact-settings')"><i class="fa-solid fa-headset w-4 text-center text-amber-400"></i> <span>Contact Settings</span></div>
-                <div class="sidebar-link admin-nav-link master-admin-only hidden" data-section="appearance" onclick="showAdminSection('appearance')"><i class="fa-solid fa-image w-4 text-center text-amber-400"></i> <span>Site Appearance</span></div>
-                <div class="sidebar-link admin-nav-link master-admin-only hidden" data-section="admin-accounts" onclick="showAdminSection('admin-accounts')"><i class="fa-solid fa-user-shield w-4 text-center text-amber-400"></i> <span>Admin Accounts</span></div>
-                <div class="sidebar-link admin-nav-link master-admin-only hidden" data-section="backup" onclick="showAdminSection('backup')"><i class="fa-solid fa-database w-4 text-center text-amber-400"></i> <span>Backup &amp; Restore</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-zoom')"><i class="fa-solid fa-video w-4 text-center text-rose-400"></i> <span>Zoom Class</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-lessons')"><i class="fa-solid fa-book-medical w-4 text-center text-indigo-300"></i> <span>Add Lesson</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-weeks')"><i class="fa-solid fa-layer-group w-4 text-center text-indigo-300"></i> <span>Weeks & Lessons</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-quizbuilder')"><i class="fa-solid fa-circle-question w-4 text-center text-indigo-300"></i> <span>Quiz Builder</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-students')"><i class="fa-solid fa-users w-4 text-center text-emerald-400"></i> <span>Students</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-messages')"><i class="fa-solid fa-comments w-4 text-center text-emerald-400"></i> <span>Messages</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-announce')"><i class="fa-solid fa-bullhorn w-4 text-center text-purple-400"></i> <span>Announcements</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-graph')"><i class="fa-solid fa-chart-line w-4 text-center text-purple-400"></i> <span>Progress Graph</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-goals')"><i class="fa-solid fa-bullseye w-4 text-center text-purple-400"></i> <span>Goals</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-pastpapers-admin')"><i class="fa-solid fa-file-lines w-4 text-center text-sky-400"></i> <span>Past Papers</span></div>
+                <div class="sidebar-link" onclick="scrollToAdminSection('anchor-songs')"><i class="fa-brands fa-youtube w-4 text-center text-sky-400"></i> <span>Song Playlists</span></div>
+                <div class="sidebar-link master-admin-only hidden" onclick="scrollToAdminSection('anchor-contact-settings')"><i class="fa-solid fa-headset w-4 text-center text-amber-400"></i> <span>Contact Settings</span></div>
+                <div class="sidebar-link master-admin-only hidden" onclick="scrollToAdminSection('anchor-appearance')"><i class="fa-solid fa-image w-4 text-center text-amber-400"></i> <span>Site Appearance</span></div>
+                <div class="sidebar-link master-admin-only hidden" onclick="scrollToAdminSection('anchor-admin-accounts')"><i class="fa-solid fa-user-shield w-4 text-center text-amber-400"></i> <span>Admin Accounts</span></div>
+                <div class="sidebar-link master-admin-only hidden" onclick="scrollToAdminSection('anchor-backup')"><i class="fa-solid fa-database w-4 text-center text-amber-400"></i> <span>Backup &amp; Restore</span></div>
             </div>
 
             <p class="sidebar-section-label mt-3" id="txt-sidebar-account">Account</p>
@@ -1296,24 +1197,6 @@
                 <div id="student-zoom-box" class="relative bg-[#120f1d]/90 backdrop-blur-md border border-indigo-500/40 p-5 rounded-2xl w-full md:w-80 shadow-2xl z-10"></div>
             </div>
 
-            <!-- LIVE BROADCAST BANNER (shown only while the admin has "Go Live" turned on) -->
-            <div id="live-broadcast-banner" class="hidden relative overflow-hidden bg-gradient-to-r from-rose-950 via-[#1a0d16] to-rose-950 border border-rose-500/50 rounded-3xl p-5 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div class="absolute inset-0 opacity-30 pointer-events-none" style="background: radial-gradient(circle at 20% 50%, rgba(244,63,94,0.4), transparent 60%);"></div>
-                <div class="relative flex items-center gap-3.5 z-10 min-w-0">
-                    <span class="relative flex h-3 w-3 shrink-0">
-                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75"></span>
-                        <span class="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
-                    </span>
-                    <div class="min-w-0">
-                        <p class="text-[10px] font-black text-rose-300 uppercase tracking-[0.15em]" id="live-banner-label">🔴 LIVE NOW</p>
-                        <p class="text-sm sm:text-base font-bold text-white truncate" id="live-banner-title">Class is live — join now!</p>
-                    </div>
-                </div>
-                <a id="live-banner-join-btn" href="#" target="_blank" class="shine-btn relative z-10 shrink-0 bg-rose-600 hover:bg-rose-500 text-white text-xs font-black px-6 py-3 rounded-2xl transition shadow-xl flex items-center gap-2 whitespace-nowrap">
-                    <i class="fa-solid fa-video"></i> <span id="live-banner-join-text">Join Now</span>
-                </a>
-            </div>
-
             <!-- QUOTES BANNER -->
             <div class="bg-indigo-950/40 border border-indigo-500/30 p-5 rounded-3xl backdrop-blur-md flex items-center gap-4 shadow-xl">
                 <div class="w-10 h-10 rounded-2xl bg-indigo-600/30 border border-indigo-500/50 text-yellow-300 flex items-center justify-center shrink-0 text-sm">
@@ -1367,11 +1250,8 @@
                     </div>
                 </button>
             </div>
-        </div>
 
-        <!-- MY PROGRESS — score chart, goals, study streak (own sidebar-accessible section,
-             kept off the main dashboard so the dashboard fits on one screen without scrolling) -->
-        <div id="progress-section" class="hidden w-full max-w-6xl space-y-6">
+            <!-- ANALYTICS SECTION -->
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div class="lg:col-span-2 bg-[#161224]/90 backdrop-blur-2xl border border-slate-800/80 p-6 rounded-3xl shadow-xl space-y-4">
                     <h3 id="chart-box-title" class="text-sm font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-chart-line"></i> සතිපතා ලකුණු ප්‍රගතිය සහ විස්තරාත්මක විශ්ලේෂණය</h3>
@@ -1567,53 +1447,8 @@
                     <span id="admin-role-badge" class="bg-indigo-600/20 text-indigo-400 text-xs font-extrabold px-3 py-1.5 rounded-xl border border-indigo-500/30 whitespace-nowrap">Admin</span>
                 </div>
 
-                <!-- DASHBOARD (default landing view — just the at-a-glance stats, everything else lives behind its own sidebar link now) -->
-                <div class="admin-section" data-section="dashboard">
-                    <!-- DEFAULT-PASSWORD SECURITY WARNING (shown only while this admin still has the seeded default password) -->
-                    <div id="default-password-warning" class="hidden bg-amber-500/10 border border-amber-500/40 text-amber-200 text-[11px] leading-relaxed rounded-2xl p-4 flex items-start sm:items-center gap-3 flex-col sm:flex-row justify-between mb-6">
-                        <span class="flex items-start gap-2.5"><i class="fa-solid fa-triangle-exclamation mt-0.5 shrink-0"></i> <span id="default-password-warning-text">This account is still using the default password. Change it now to keep your admin panel secure.</span></span>
-                        <button onclick="openForgotPasswordModal(); const el=document.getElementById('fp-email-input'); if(el && currentUser) el.value = currentUser.email;" class="shrink-0 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-100 text-[10px] font-bold px-3.5 py-2 rounded-xl transition cursor-pointer whitespace-nowrap" id="default-password-warning-btn">Change Password</button>
-                    </div>
-
-                    <!-- ADMIN STATS OVERVIEW -->
-                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
-                        <div class="lift-card bg-gradient-to-br from-indigo-950 to-[#0f0c1a] border border-indigo-500/25 p-4 rounded-2xl text-center space-y-1">
-                            <i class="fa-solid fa-users text-indigo-400 text-sm"></i>
-                            <p id="stat-total-students" class="text-xl font-black text-white">0</p>
-                            <p class="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Students</p>
-                        </div>
-                        <div class="lift-card bg-gradient-to-br from-purple-950 to-[#0f0c1a] border border-purple-500/25 p-4 rounded-2xl text-center space-y-1">
-                            <i class="fa-solid fa-book-open text-purple-400 text-sm"></i>
-                            <p id="stat-total-lessons" class="text-xl font-black text-white">0</p>
-                            <p class="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Lessons</p>
-                        </div>
-                        <div class="lift-card bg-gradient-to-br from-emerald-950 to-[#0f0c1a] border border-emerald-500/25 p-4 rounded-2xl text-center space-y-1">
-                            <i class="fa-solid fa-unlock text-emerald-400 text-sm"></i>
-                            <p id="stat-unlocked-weeks" class="text-xl font-black text-white">0/16</p>
-                            <p class="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Weeks Live</p>
-                        </div>
-                        <div class="lift-card bg-gradient-to-br from-rose-950 to-[#0f0c1a] border border-rose-500/25 p-4 rounded-2xl text-center space-y-1 relative">
-                            <i class="fa-solid fa-comment-dots text-rose-400 text-sm"></i>
-                            <p id="stat-unread-messages" class="text-xl font-black text-white">0</p>
-                            <p class="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Unread Msgs</p>
-                        </div>
-                        <div class="lift-card bg-gradient-to-br from-amber-950 to-[#0f0c1a] border border-amber-500/25 p-4 rounded-2xl text-center space-y-1">
-                            <i class="fa-solid fa-circle-question text-amber-400 text-sm"></i>
-                            <p id="stat-quiz-attempts" class="text-xl font-black text-white">0</p>
-                            <p class="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Quiz Attempts</p>
-                        </div>
-                        <div class="lift-card bg-gradient-to-br from-sky-950 to-[#0f0c1a] border border-sky-500/25 p-4 rounded-2xl text-center space-y-1">
-                            <i class="fa-solid fa-bullhorn text-sky-400 text-sm"></i>
-                            <p id="stat-announcements" class="text-xl font-black text-white">0</p>
-                            <p class="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Announcements</p>
-                        </div>
-                    </div>
-                    <p class="text-[10px] text-slate-600 mt-4"><i class="fa-solid fa-circle-info mr-1"></i> Use the sidebar on the left to jump to any control — Zoom Class, Lessons, Students, and everything else now opens its own focused screen.</p>
-                </div>
-
-                <!-- ZOOM CLASS -->
-                <div class="admin-section hidden" data-section="zoom">
-                    <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner max-w-xl">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
                         <h3 id="anchor-zoom" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-video"></i> Zoom Live Class විස්තර</h3>
                         <div class="space-y-3">
                             <div>
@@ -1629,107 +1464,96 @@
                                 <input type="text" id="admin-zoom-pass" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition">
                             </div>
                             <button onclick="saveZoomDetails()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg mt-2">Update Zoom</button>
-                            <button onclick="toggleLiveBroadcast()" id="admin-live-toggle-btn" class="w-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg flex items-center justify-center gap-2">
-                                <span class="w-2 h-2 rounded-full bg-white/80" id="admin-live-toggle-dot"></span> <span id="admin-live-toggle-text">Go Live Now</span>
-                            </button>
-                            <p class="text-[9px] text-slate-600 leading-relaxed">Turning this on shows a pulsing "LIVE NOW" banner with a Join button to every student, using the link above, and sends them a notification.</p>
                         </div>
                     </div>
-                </div>
 
-                <!-- ADD LESSON -->
-                <div class="admin-section hidden" data-section="lessons">
-                    <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner max-w-3xl">
-                        <h3 id="anchor-lessons" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-book-medical"></i> සතියකට අලුත් පාඩමක් හෝ PDF එකක් එක් කරන්න</h3>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div>
-                                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">අදාළ සතිය තෝරන්න</label>
-                                <select id="admin-target-week" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition"></select>
+                    <div class="lg:col-span-2 space-y-6">
+                        <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
+                            <h3 id="anchor-lessons" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-book-medical"></i> සතියකට අලුත් පාඩමක් හෝ PDF එකක් එක් කරන්න</h3>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">අදාළ සතිය තෝරන්න</label>
+                                    <select id="admin-target-week" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition"></select>
+                                </div>
+                                <div>
+                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">පාඩමේ නම</label>
+                                    <input type="text" id="admin-lesson-title" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition" placeholder="උදා: ත්‍රිකෝණමිතිය">
+                                </div>
+                                <div>
+                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">PDF / Tutorial Link</label>
+                                    <input type="text" id="admin-pdf-link" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition" placeholder="Google Drive Link">
+                                    <label class="mt-1.5 flex items-center gap-1.5 text-[10px] font-bold text-indigo-300 hover:text-indigo-200 cursor-pointer transition w-fit">
+                                        <i class="fa-solid fa-upload"></i> <span id="admin-pdf-upload-label">PDF file එකක් upload කරන්න (optional)</span>
+                                        <input type="file" accept="application/pdf" class="hidden" onchange="handlePdfFileSelect(this, 'admin-pdf-link', 'admin-pdf-upload-label')">
+                                    </label>
+                                    <p class="text-[9px] text-slate-600 mt-1 leading-relaxed">Drive link use කරනවා නම්: folder එක නෙවෙයි, තනි file එක open කරලා ඒකේම Share → Copy link එක දාන්න.</p>
+                                </div>
+                                <div>
+                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Activities / Quiz Link</label>
+                                    <input type="text" id="admin-activity-link" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition" placeholder="Online Quiz Link">
+                                </div>
                             </div>
-                            <div>
-                                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">පාඩමේ නම</label>
-                                <input type="text" id="admin-lesson-title" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition" placeholder="උදා: ත්‍රිකෝණමිතිය">
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">පාඩම HTML / UI Code (Full-Screen Viewer) — ඕනෑනම් පමණයි</label>
+                                <textarea id="admin-lesson-code" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition h-20" placeholder="Paste HTML for a full-screen lesson viewer (optional)..."></textarea>
                             </div>
-                            <div>
-                                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">PDF / Tutorial Link</label>
-                                <input type="text" id="admin-pdf-link" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition" placeholder="Google Drive Link">
-                                <label class="mt-1.5 flex items-center gap-1.5 text-[10px] font-bold text-indigo-300 hover:text-indigo-200 cursor-pointer transition w-fit">
-                                    <i class="fa-solid fa-upload"></i> <span id="admin-pdf-upload-label">PDF file එකක් upload කරන්න (optional)</span>
-                                    <input type="file" accept="application/pdf" class="hidden" onchange="handlePdfFileSelect(this, 'admin-pdf-link', 'admin-pdf-upload-label')">
-                                </label>
-                                <p class="text-[9px] text-slate-600 mt-1 leading-relaxed">Drive link use කරනවා නම්: folder එක නෙවෙයි, තනි file එක open කරලා ඒකේම Share → Copy link එක දාන්න.</p>
-                            </div>
-                            <div>
-                                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Activities / Quiz Link</label>
-                                <input type="text" id="admin-activity-link" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition" placeholder="Online Quiz Link">
+                            <button onclick="addLessonToWeek()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg mt-2">පාඩම සතියට එකතු කරන්න</button>
+                        </div>
+
+                        <!-- ANNOUNCEMENT -->
+                        <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
+                            <h3 id="anchor-announce" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-bullhorn"></i> සිසුන් සියලුදෙනාට Notification එකක් යවන්න</h3>
+                            <input type="text" id="admin-notif-text" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition" placeholder="උදා: New lesson added to Week 3!">
+                            <button onclick="sendAdminNotification()" class="w-full bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg"><i class="fa-solid fa-paper-plane mr-1"></i> Send Announcement</button>
+
+                            <div class="border-t border-slate-800 pt-4 space-y-2.5">
+                                <div class="flex items-center justify-between">
+                                    <h4 class="text-[11px] font-extrabold text-slate-300 flex items-center gap-1.5"><i class="fa-solid fa-list-check text-slate-500"></i> යවපු Notifications කළමනාකරණය</h4>
+                                    <button onclick="clearAllAdminNotifications()" class="text-[10px] font-bold text-rose-400 hover:text-rose-300 transition cursor-pointer flex items-center gap-1"><i class="fa-solid fa-trash-can"></i> සියල්ල මකන්න</button>
+                                </div>
+                                <div id="admin-notif-manage-list" class="space-y-2 max-h-64 overflow-y-auto pr-1"></div>
+                                <p id="admin-notif-manage-empty" class="hidden text-center text-[10px] text-slate-600 py-4">තවම notifications එවා නැත</p>
                             </div>
                         </div>
-                        <div class="space-y-1">
-                            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">පාඩම HTML / UI Code (Full-Screen Viewer) — ඕනෑනම් පමණයි</label>
-                            <textarea id="admin-lesson-code" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition h-20" placeholder="Paste HTML for a full-screen lesson viewer (optional)..."></textarea>
-                        </div>
-                        <button onclick="addLessonToWeek()" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 px-8 rounded-xl transition cursor-pointer shadow-lg mt-2">පාඩම සතියට එකතු කරන්න</button>
-                    </div>
-                </div>
 
-                <!-- ANNOUNCEMENT -->
-                <div class="admin-section hidden" data-section="announce">
-                    <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner max-w-2xl">
-                        <h3 id="anchor-announce" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-bullhorn"></i> සිසුන් සියලුදෙනාට Notification එකක් යවන්න</h3>
-                        <input type="text" id="admin-notif-text" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition" placeholder="උදා: New lesson added to Week 3!">
-                        <button onclick="sendAdminNotification()" class="w-full bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg"><i class="fa-solid fa-paper-plane mr-1"></i> Send Announcement</button>
-
-                        <div class="border-t border-slate-800 pt-4 space-y-2.5">
-                            <div class="flex items-center justify-between">
-                                <h4 class="text-[11px] font-extrabold text-slate-300 flex items-center gap-1.5"><i class="fa-solid fa-list-check text-slate-500"></i> යවපු Notifications කළමනාකරණය</h4>
-                                <button onclick="clearAllAdminNotifications()" class="text-[10px] font-bold text-rose-400 hover:text-rose-300 transition cursor-pointer flex items-center gap-1"><i class="fa-solid fa-trash-can"></i> සියල්ල මකන්න</button>
-                            </div>
-                            <div id="admin-notif-manage-list" class="space-y-2 max-h-64 overflow-y-auto pr-1"></div>
-                            <p id="admin-notif-manage-empty" class="hidden text-center text-[10px] text-slate-600 py-4">තවම notifications එවා නැත</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- PROGRESS GRAPH SETTINGS -->
-                <div class="admin-section hidden" data-section="graph">
-                    <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner max-w-xl">
-                        <h3 id="anchor-graph" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-chart-line"></i> ප්‍රගති ප්‍රස්ථාරයේ මූලාශ්‍රය (Progress Graph Source)</h3>
-                        <p class="text-[10px] text-slate-500 leading-relaxed">සිසුන්ගේ dashboard එකේ පෙන්නන Progress Graph එක මොන Paper/Week එකේ Quiz ලකුණු වලින්ද හදන්නේ කියලා මෙතනින් තෝරන්න. සියලුම සිසුන්ටම එකම මූලාශ්‍රය පෙන්වයි.</p>
-                        <div>
-                            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Paper / Week තෝරන්න</label>
-                            <select id="admin-graph-scope" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition"></select>
-                        </div>
-                        <button onclick="saveProgressGraphScope()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg">මූලාශ්‍රය සුරකින්න (Save)</button>
-                    </div>
-                </div>
-
-                <!-- GOALS & ACHIEVEMENTS SETTINGS -->
-                <div class="admin-section hidden" data-section="goals">
-                    <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner max-w-xl">
-                        <h3 id="anchor-goals" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-bullseye"></i> Goals &amp; Achievements කළමනාකරණය</h3>
-                        <p class="text-[10px] text-slate-500 leading-relaxed">සිසුන්ගේ dashboard එකේ "Revision Completed" % එකයි "Papers" ගණනයි කුමන දත්තයකින් පෙන්වන්නද කියා පමණක් තෝරන්න — අගයන් එක් එක් සිසුවා සැබවින්ම කර ඇති දේ අනුව ස්වයංක්‍රීයව ගණනය වේ.</p>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <!-- PROGRESS GRAPH SETTINGS -->
+                        <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
+                            <h3 id="anchor-graph" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-chart-line"></i> ප්‍රගති ප්‍රස්ථාරයේ මූලාශ්‍රය (Progress Graph Source)</h3>
+                            <p class="text-[10px] text-slate-500 leading-relaxed">සිසුන්ගේ dashboard එකේ පෙන්නන Progress Graph එක මොන Paper/Week එකේ Quiz ලකුණු වලින්ද හදන්නේ කියලා මෙතනින් තෝරන්න. සියලුම සිසුන්ටම එකම මූලාශ්‍රය පෙන්වයි.</p>
                             <div>
-                                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">"Revision %" කුමකින් ගණනය කරන්නද?</label>
-                                <select id="admin-goals-revision-metric" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition">
-                                    <option value="quizzes">Quizzes Completed (attempted / total lessons)</option>
-                                    <option value="weeks">Weeks Unlocked (unlocked / total weeks)</option>
-                                </select>
+                                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Paper / Week තෝරන්න</label>
+                                <select id="admin-graph-scope" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition"></select>
                             </div>
-                            <div>
-                                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">"Papers" කුමකින් ගණනය කරන්නද?</label>
-                                <select id="admin-goals-papers-metric" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition">
-                                    <option value="quizzes">Quizzes Attempted (of all lessons)</option>
-                                    <option value="pastpapers">Past Papers Marked as Solved</option>
-                                </select>
-                            </div>
+                            <button onclick="saveProgressGraphScope()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg">මූලාශ්‍රය සුරකින්න (Save)</button>
                         </div>
-                        <button onclick="saveGoalsData()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg">Goals සුරකින්න (Save)</button>
+
+                        <!-- GOALS & ACHIEVEMENTS SETTINGS -->
+                        <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
+                            <h3 id="anchor-goals" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-bullseye"></i> Goals &amp; Achievements කළමනාකරණය</h3>
+                            <p class="text-[10px] text-slate-500 leading-relaxed">සිසුන්ගේ dashboard එකේ "Revision Completed" % එකයි "Papers" ගණනයි කුමන දත්තයකින් පෙන්වන්නද කියා පමණක් තෝරන්න — අගයන් එක් එක් සිසුවා සැබවින්ම කර ඇති දේ අනුව ස්වයංක්‍රීයව ගණනය වේ.</p>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div>
+                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">"Revision %" කුමකින් ගණනය කරන්නද?</label>
+                                    <select id="admin-goals-revision-metric" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition">
+                                        <option value="quizzes">Quizzes Completed (attempted / total lessons)</option>
+                                        <option value="weeks">Weeks Unlocked (unlocked / total weeks)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">"Papers" කුමකින් ගණනය කරන්නද?</label>
+                                    <select id="admin-goals-papers-metric" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white mt-1 focus:border-indigo-500 focus:outline-none transition">
+                                        <option value="quizzes">Quizzes Attempted (of all lessons)</option>
+                                        <option value="pastpapers">Past Papers Marked as Solved</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button onclick="saveGoalsData()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 rounded-xl transition cursor-pointer shadow-lg">Goals සුරකින්න (Save)</button>
+                        </div>
                     </div>
                 </div>
 
                 <!-- PAST PAPERS MANAGER -->
-                <div class="admin-section hidden" data-section="pastpapers-admin">
+                <div class="border-t border-slate-800 pt-6 space-y-4">
                     <h3 id="anchor-pastpapers-admin" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-file-lines"></i> Past Papers කළමනාකරණය</h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
                         <p class="text-[10px] text-slate-500 leading-relaxed">වසරක් එකතු කරලා, ඒ යටතට papers දාන්න. "Published" කරන තුරු සිසුන්ට "Coming Soon" විදිහට පෙන්වයි — වසර අනුව වෙන වෙනම publish කරන්න පුළුවන්.</p>
@@ -1742,7 +1566,7 @@
                 </div>
 
                 <!-- SONG PLAYLISTS MANAGER (Focus Mode — real songs via official YouTube embed) -->
-                <div class="admin-section hidden" data-section="songs">
+                <div class="border-t border-slate-800 pt-6 space-y-4">
                     <h3 id="anchor-songs" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-brands fa-youtube"></i> Focus Mode Song Playlists</h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
                         <p class="text-[10px] text-slate-500 leading-relaxed">English / Sinhala / Hindi song එකක් වචනයෙන් නමක් සහ YouTube link එකක් දාන්න — Focus Mode එකේ සිසුන්ට official YouTube player එකෙන්ම play කරන්න පුළුවන් වෙනවා. (කැමති ගණනක් songs දාන්න පුළුවන්, 3ක් යෝජනා කළත්.)</p>
@@ -1796,18 +1620,12 @@
                 </div>
 
                 <!-- STUDENT MESSAGES INBOX -->
-                <div class="admin-section hidden" data-section="messages">
-                    <div class="flex items-center justify-between gap-2 flex-wrap">
-                        <h3 id="anchor-messages" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-comments"></i> Student Messages</h3>
-                        <button onclick="clearAllMessageThreads()" class="text-[10px] font-bold text-slate-500 hover:text-rose-400 transition cursor-pointer flex items-center gap-1.5"><i class="fa-solid fa-broom"></i> Clear all conversations</button>
-                    </div>
+                <div class="border-t border-slate-800 pt-6 space-y-4">
+                    <h3 id="anchor-messages" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-comments"></i> Student Messages</h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl shadow-inner grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div id="admin-messages-inbox" class="space-y-2 max-h-80 overflow-y-auto pr-1"></div>
                         <div id="admin-message-thread-wrap" class="hidden flex flex-col">
-                            <div class="flex items-center justify-between gap-2 mb-2">
-                                <p class="text-xs font-bold text-white" id="admin-message-thread-name"></p>
-                                <button onclick="clearMessageThread()" title="Clear this conversation" class="shrink-0 w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid fa-trash"></i></button>
-                            </div>
+                            <p class="text-xs font-bold text-white mb-2" id="admin-message-thread-name"></p>
                             <div id="admin-message-thread" class="space-y-2 flex-1 max-h-56 overflow-y-auto pr-1 mb-2"></div>
                             <div class="flex gap-2">
                                 <input type="text" id="admin-message-reply-input" placeholder="Reply…" class="flex-1 bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500" onkeypress="if(event.key==='Enter') sendAdminReply();">
@@ -1819,7 +1637,7 @@
                 </div>
 
                 <!-- CONTACT US SETTINGS (Master Admin only) -->
-                <div class="master-admin-only admin-section hidden" data-section="contact-settings">
+                <div class="master-admin-only hidden border-t border-slate-800 pt-6 space-y-4">
                     <h3 id="anchor-contact-settings" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-headset"></i> Contact Us Links <span class="text-[9px] bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-md">Master Admin Only</span></h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1846,7 +1664,7 @@
                 </div>
 
                 <!-- SITE APPEARANCE (Master Admin only) -->
-                <div class="master-admin-only admin-section hidden" data-section="appearance">
+                <div class="master-admin-only hidden border-t border-slate-800 pt-6 space-y-4">
                     <h3 id="anchor-appearance" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-image"></i> අඩවියේ පින්තූර කළමනාකරණය (Site Appearance) <span class="text-[9px] bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-md">Master Admin Only</span></h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1864,14 +1682,13 @@
                 </div>
 
                 <!-- ADMIN ACCOUNTS (Master Admin only) -->
-                <div class="master-admin-only admin-section hidden" data-section="admin-accounts">
+                <div class="master-admin-only hidden border-t border-slate-800 pt-6 space-y-4">
                     <h3 id="anchor-admin-accounts" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-user-shield"></i> Admin ගිණුම් කළමනාකරණය <span class="text-[9px] bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-md">Master Admin Only</span></h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
-                        <div class="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
                             <input type="text" id="new-admin-name" placeholder="Full Name" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition">
-                            <input type="email" id="new-admin-email" placeholder="Email" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition">
                             <input type="text" id="new-admin-username" placeholder="Username" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition">
-                            <input type="password" id="new-admin-password" placeholder="Password (min 6 chars)" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition">
+                            <input type="text" id="new-admin-password" placeholder="Password" class="w-full bg-[#161224] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-indigo-500 focus:outline-none transition">
                             <button onclick="createAdminAccount()" class="w-full bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2.5 rounded-xl transition cursor-pointer shadow-lg"><i class="fa-solid fa-user-plus mr-1"></i> Add Admin</button>
                         </div>
                         <div id="admin-accounts-list" class="space-y-2 pt-2"></div>
@@ -1879,7 +1696,7 @@
                 </div>
 
                 <!-- BACKUP & RESTORE (Master Admin only) -->
-                <div class="master-admin-only admin-section hidden" data-section="backup">
+                <div class="master-admin-only hidden border-t border-slate-800 pt-6 space-y-4">
                     <h3 id="anchor-backup" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-database"></i> Backup &amp; Restore <span class="text-[9px] bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 px-2 py-0.5 rounded-md">Master Admin Only</span></h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-3 shadow-inner">
                         <p class="text-[11px] text-slate-400 leading-relaxed">සම්පූර්ණ site data (users, weeks, quizzes, notifications, appearance) JSON file එකක් විදිහට download කරගන්න, හෝ backup එකකින් restore කරන්න.</p>
@@ -1894,13 +1711,13 @@
                 </div>
 
                 <!-- WEEKS & LESSONS MANAGER -->
-                <div class="admin-section hidden" data-section="weeks">
+                <div class="border-t border-slate-800 pt-6 space-y-4">
                     <h3 id="anchor-weeks" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-layer-group"></i> සති සහ පාඩම් කළමනාකරණය (Manage Weeks &amp; Lessons)</h3>
                     <div id="admin-weeks-manager" class="grid grid-cols-1 lg:grid-cols-2 gap-4"></div>
                 </div>
 
                 <!-- QUIZ BUILDER -->
-                <div class="admin-section hidden" data-section="quizbuilder">
+                <div class="border-t border-slate-800 pt-6 space-y-4">
                     <h3 id="anchor-quizbuilder" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-circle-question"></i> ප්‍රශ්නාවලි නිර්මාණය (Quiz Builder)</h3>
                     <div class="bg-[#0f0c1a] border border-slate-800 p-5 rounded-2xl space-y-4 shadow-inner">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1937,25 +1754,8 @@
                 </div>
 
                 <!-- USERS MANAGER -->
-                <div class="admin-section hidden" data-section="students">
+                <div class="border-t border-slate-800 pt-6 space-y-4">
                     <h3 id="anchor-students" class="text-xs font-extrabold text-indigo-300 flex items-center gap-2"><i class="fa-solid fa-users"></i> ලියාපදිංචි සිසුන් (Registered Students) — <span id="admin-user-count">0</span></h3>
-
-                    <!-- BULK ACCESS GRANT (applies to every student in one go) -->
-                    <div class="bg-indigo-950/30 border border-indigo-500/30 rounded-2xl p-4 space-y-3">
-                        <p class="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-2"><i class="fa-solid fa-users-gear"></i> <span id="bulk-access-label">Bulk Access — apply to ALL students at once</span></p>
-                        <div class="flex flex-wrap items-center gap-2">
-                            <input type="date" id="bulk-access-date-input" class="bg-[#161224] border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none transition">
-                            <button onclick="setBulkAccessPreset(1)" class="bulk-access-preset-btn bg-[#161224] hover:bg-indigo-600 border border-slate-800 text-slate-300 hover:text-white text-[10px] font-bold px-3 py-2 rounded-xl transition cursor-pointer">+1 Month</button>
-                            <button onclick="setBulkAccessPreset(3)" class="bulk-access-preset-btn bg-[#161224] hover:bg-indigo-600 border border-slate-800 text-slate-300 hover:text-white text-[10px] font-bold px-3 py-2 rounded-xl transition cursor-pointer">+3 Months</button>
-                            <button onclick="setBulkAccessPreset(12)" class="bulk-access-preset-btn bg-[#161224] hover:bg-indigo-600 border border-slate-800 text-slate-300 hover:text-white text-[10px] font-bold px-3 py-2 rounded-xl transition cursor-pointer">+1 Year</button>
-                        </div>
-                        <div class="flex flex-wrap gap-2">
-                            <button onclick="grantAccessToAllStudents()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition cursor-pointer shadow-lg flex items-center gap-2"><i class="fa-solid fa-unlock"></i> <span id="bulk-access-grant-btn">Grant Access to All Students</span></button>
-                            <button onclick="revokeAccessFromAllStudents()" class="bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white text-xs font-bold px-4 py-2.5 rounded-xl transition cursor-pointer flex items-center gap-2"><i class="fa-solid fa-lock"></i> <span id="bulk-access-revoke-btn">Revoke Access from All</span></button>
-                        </div>
-                        <p class="text-[9px] text-slate-600 leading-relaxed" id="bulk-access-note">This sets every registered student's access to the chosen date at once — you can still fine-tune one student individually below afterwards.</p>
-                    </div>
-
                     <div id="admin-users-list" class="space-y-2"></div>
                 </div>
             </div>
@@ -2206,12 +2006,12 @@
 
                 <!-- NOW PLAYING BAR with Prev / Play-Pause / Next -->
                 <div class="flex items-center justify-between gap-3 bg-[#0f0c1a] border border-slate-800 rounded-2xl px-4 py-3">
-                    <button onclick="miniPlayerPrev()" class="w-9 h-9 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer transition shrink-0" title="Previous"><i class="fa-solid fa-backward-step"></i></button>
+                    <button onclick="focusPrevTrack()" class="w-9 h-9 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer transition shrink-0" title="Previous"><i class="fa-solid fa-backward-step"></i></button>
                     <div class="min-w-0 text-center flex-1">
                         <p class="text-[9px] font-bold text-indigo-300 uppercase tracking-wider" id="focus-nowplaying-label">Select a Sound</p>
                         <p id="focus-nowplaying-name" class="text-xs sm:text-sm font-black text-white truncate">—</p>
                     </div>
-                    <button onclick="miniPlayerNext()" class="w-9 h-9 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer transition shrink-0" title="Next"><i class="fa-solid fa-forward-step"></i></button>
+                    <button onclick="focusNextTrack()" class="w-9 h-9 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer transition shrink-0" title="Next"><i class="fa-solid fa-forward-step"></i></button>
                 </div>
 
                 <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
@@ -2361,94 +2161,34 @@
                     <p class="text-[9px] text-slate-400 truncate" id="chatbot-subtitle">O/L Maths සහ App එකට උදව්වක්</p>
                 </div>
             </div>
-            <div class="flex items-center gap-1.5 shrink-0">
-                <button onclick="toggleChatbotCalculator()" id="chatbot-calc-toggle-btn" class="w-7 h-7 rounded-lg bg-slate-900 hover:bg-indigo-600 text-slate-400 hover:text-white flex items-center justify-center text-xs cursor-pointer transition" title="Scientific Calculator"><i class="fa-solid fa-calculator"></i></button>
-                <button onclick="toggleChatbot()" class="w-7 h-7 rounded-lg bg-slate-900 text-slate-400 hover:text-white flex items-center justify-center text-xs cursor-pointer shrink-0"><i class="fa-solid fa-xmark"></i></button>
-            </div>
+            <button onclick="toggleChatbot()" class="w-7 h-7 rounded-lg bg-slate-900 text-slate-400 hover:text-white flex items-center justify-center text-xs cursor-pointer shrink-0"><i class="fa-solid fa-xmark"></i></button>
         </div>
-
-        <!-- CHAT VIEW -->
-        <div id="chatbot-chat-view" class="flex-1 flex flex-col min-h-0">
-            <div id="chatbot-messages" class="flex-1 overflow-y-auto p-3.5 space-y-2.5"></div>
-            <div id="chatbot-suggestions" class="px-3.5 pb-2 flex flex-wrap gap-1.5"></div>
-            <div class="p-3 border-t border-slate-800 flex items-center gap-2">
-                <input type="text" id="chatbot-input" placeholder="ප්‍රශ්නයක් type කරන්න…" class="flex-1 bg-[#0f0c1a] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 transition" onkeypress="if(event.key==='Enter') sendChatbotMessage();">
-                <button onclick="sendChatbotMessage()" class="bg-indigo-600 hover:bg-indigo-500 text-white w-9 h-9 rounded-xl transition cursor-pointer flex items-center justify-center shrink-0"><i class="fa-solid fa-paper-plane text-xs"></i></button>
-            </div>
-        </div>
-
-        <!-- SCIENTIFIC CALCULATOR VIEW -->
-        <div id="chatbot-calc-view" class="hidden flex-1 flex flex-col min-h-0 p-3 gap-2.5 overflow-y-auto">
-            <div class="bg-[#0f0c1a] border border-slate-800 rounded-2xl px-3.5 py-3 text-right space-y-1">
-                <p id="calc-expression" class="text-[10px] text-slate-500 truncate min-h-[14px]">&nbsp;</p>
-                <p id="calc-display" class="text-xl font-black text-white truncate tabular-nums">0</p>
-            </div>
-            <div id="calc-mode-indicator" class="text-[9px] font-bold text-indigo-400 text-right pr-1">DEG</div>
-            <div class="grid grid-cols-5 gap-1.5 text-[11px] font-bold">
-                <button onclick="calcInput('sin(')" class="calc-btn-fn">sin</button>
-                <button onclick="calcInput('cos(')" class="calc-btn-fn">cos</button>
-                <button onclick="calcInput('tan(')" class="calc-btn-fn">tan</button>
-                <button onclick="calcInput('log(')" class="calc-btn-fn">log</button>
-                <button onclick="calcInput('ln(')" class="calc-btn-fn">ln</button>
-
-                <button onclick="calcInput('(')" class="calc-btn-fn">(</button>
-                <button onclick="calcInput(')')" class="calc-btn-fn">)</button>
-                <button onclick="calcInput('sqrt(')" class="calc-btn-fn">√</button>
-                <button onclick="calcInput('^')" class="calc-btn-fn">x^y</button>
-                <button onclick="calcToggleMode()" id="calc-mode-btn" class="calc-btn-fn">DEG</button>
-
-                <button onclick="calcInput('7')" class="calc-btn-num">7</button>
-                <button onclick="calcInput('8')" class="calc-btn-num">8</button>
-                <button onclick="calcInput('9')" class="calc-btn-num">9</button>
-                <button onclick="calcClearEntry()" class="calc-btn-op">C</button>
-                <button onclick="calcBackspace()" class="calc-btn-op"><i class="fa-solid fa-delete-left"></i></button>
-
-                <button onclick="calcInput('4')" class="calc-btn-num">4</button>
-                <button onclick="calcInput('5')" class="calc-btn-num">5</button>
-                <button onclick="calcInput('6')" class="calc-btn-num">6</button>
-                <button onclick="calcInput('*')" class="calc-btn-op">×</button>
-                <button onclick="calcInput('/')" class="calc-btn-op">÷</button>
-
-                <button onclick="calcInput('1')" class="calc-btn-num">1</button>
-                <button onclick="calcInput('2')" class="calc-btn-num">2</button>
-                <button onclick="calcInput('3')" class="calc-btn-num">3</button>
-                <button onclick="calcInput('+')" class="calc-btn-op">+</button>
-                <button onclick="calcInput('-')" class="calc-btn-op">−</button>
-
-                <button onclick="calcInput('0')" class="calc-btn-num">0</button>
-                <button onclick="calcInput('.')" class="calc-btn-num">.</button>
-                <button onclick="calcInput('pi')" class="calc-btn-fn">π</button>
-                <button onclick="calcInput('%')" class="calc-btn-fn">%</button>
-                <button onclick="calcEquals()" class="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition cursor-pointer">=</button>
-            </div>
-            <p class="text-[9px] text-slate-600 text-center pt-1">Scientific Calculator — quiz/homework වලට help කරගන්න.</p>
+        <div id="chatbot-messages" class="flex-1 overflow-y-auto p-3.5 space-y-2.5"></div>
+        <div id="chatbot-suggestions" class="px-3.5 pb-2 flex flex-wrap gap-1.5"></div>
+        <div class="p-3 border-t border-slate-800 flex items-center gap-2">
+            <input type="text" id="chatbot-input" placeholder="ප්‍රශ්නයක් type කරන්න…" class="flex-1 bg-[#0f0c1a] border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500 transition" onkeypress="if(event.key==='Enter') sendChatbotMessage();">
+            <button onclick="sendChatbotMessage()" class="bg-indigo-600 hover:bg-indigo-500 text-white w-9 h-9 rounded-xl transition cursor-pointer flex items-center justify-center shrink-0"><i class="fa-solid fa-paper-plane text-xs"></i></button>
         </div>
     </div>
-
 
     <!-- FOCUS MUSIC MINI-CONTROL (small play/pause mark, always reachable, tucked on the right edge so it never overlaps the nav or other content) -->
     <div id="focus-top-indicator" class="hidden fixed top-1/2 right-0 -translate-y-1/2 z-[95] bg-[#161224]/90 backdrop-blur-xl border border-indigo-500/50 border-r-0 rounded-l-full shadow-2xl pl-3 pr-1.5 py-1.5 flex items-center gap-2 cursor-pointer" onclick="openFocusMode()">
         <span class="text-[10px] font-bold text-indigo-200 whitespace-nowrap">🎧 <span id="focus-top-track-name">Focus Music</span></span>
-        <button onclick="event.stopPropagation(); miniPlayerTogglePlayPause();" class="w-7 h-7 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center text-[10px] cursor-pointer transition shrink-0" title="Play/Pause">
+        <button onclick="event.stopPropagation(); toggleFocusPlayPause();" class="w-7 h-7 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center text-[10px] cursor-pointer transition shrink-0" title="Play/Pause">
             <i class="fa-solid fa-pause" id="focus-top-icon"></i>
         </button>
     </div>
 
     <!-- FOCUS MODE MINI PLAYER (persists across the app while ambient audio is playing) -->
-    <div id="focus-mini-player" class="hidden fixed bottom-5 left-5 z-[90] bg-[#161224]/95 backdrop-blur-xl border border-indigo-500/40 rounded-2xl shadow-2xl px-3.5 py-3 flex items-center gap-2.5 max-w-xs">
-        <div class="w-9 h-9 rounded-xl bg-indigo-600/25 border border-indigo-500/40 text-indigo-300 flex items-center justify-center text-xs shrink-0 animate-pulse cursor-pointer" onclick="openFocusMode()">
+    <div id="focus-mini-player" class="hidden fixed bottom-5 left-5 z-[90] bg-[#161224]/95 backdrop-blur-xl border border-indigo-500/40 rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 max-w-xs cursor-pointer" onclick="openFocusMode()">
+        <div class="w-9 h-9 rounded-xl bg-indigo-600/25 border border-indigo-500/40 text-indigo-300 flex items-center justify-center text-xs shrink-0 animate-pulse">
             <i class="fa-solid fa-music"></i>
         </div>
-        <div class="min-w-0 cursor-pointer" onclick="openFocusMode()">
+        <div class="min-w-0">
             <p class="text-[9px] font-bold text-indigo-300 uppercase tracking-wider">Now Playing</p>
-            <p id="focus-mini-track-name" class="text-xs font-bold text-white truncate max-w-[92px]">Deep Focus</p>
+            <p id="focus-mini-track-name" class="text-xs font-bold text-white truncate">Deep Focus</p>
         </div>
-        <div class="flex items-center gap-1 shrink-0">
-            <button onclick="miniPlayerPrev()" class="w-6 h-6 rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white flex items-center justify-center text-[9px] cursor-pointer transition" title="Previous"><i class="fa-solid fa-backward-step"></i></button>
-            <button onclick="miniPlayerTogglePlayPause()" id="focus-mini-playpause-btn" class="w-7 h-7 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center text-[10px] cursor-pointer transition" title="Play/Pause"><i class="fa-solid fa-pause" id="focus-mini-playpause-icon"></i></button>
-            <button onclick="miniPlayerNext()" class="w-6 h-6 rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white flex items-center justify-center text-[9px] cursor-pointer transition" title="Next"><i class="fa-solid fa-forward-step"></i></button>
-            <button onclick="miniPlayerStop()" class="w-6 h-6 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-[9px] cursor-pointer transition" title="Stop"><i class="fa-solid fa-stop"></i></button>
-        </div>
+        <button onclick="event.stopPropagation(); stopFocusTrack(); stopSongPlayer();" class="ml-1 w-7 h-7 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition shrink-0" title="Stop"><i class="fa-solid fa-stop"></i></button>
     </div>
 
 
@@ -2497,7 +2237,7 @@
                 }
                 firebase.initializeApp(firebaseConfig);
                 window.db = firebase.firestore();
-                cloudDocRef = db.collection('mathlab').doc('sharedState');
+                cloudDocRef = db.collection('moramaths').doc('sharedState');
                 firebaseReady = true;
 
                 // Storage is used to host uploaded PDF files (worksheets, past papers, etc.) —
@@ -2589,11 +2329,9 @@
                     if (typeof renderAdminSongPlaylists === 'function') renderAdminSongPlaylists();
                     if (typeof renderAdminMessagesInbox === 'function') renderAdminMessagesInbox();
                     if (viewedMessageThreadUsername && typeof openAdminMessageThread === 'function') openAdminMessageThread(viewedMessageThreadUsername);
-                    if (typeof renderAdminLiveToggle === 'function') renderAdminLiveToggle();
                 } else {
                     if (typeof setupStudentDashboard === 'function') setupStudentDashboard();
-                    const progressSec = document.getElementById('progress-section');
-                    if (progressSec && !progressSec.classList.contains('hidden') && typeof renderChart === 'function') renderChart();
+                    if (typeof renderChart === 'function') renderChart();
                     if (typeof renderGoals === 'function') renderGoals();
                     const papersSec = document.getElementById('pastpapers-section');
                     if (papersSec && !papersSec.classList.contains('hidden') && typeof renderPastPapersView === 'function') renderPastPapersView();
@@ -2620,21 +2358,68 @@
             if (!firebaseReady || !cloudDocRef) { initApp(); return; }
 
             let started = false;
-            const startOnce = () => {
+            const startOnce = (fromCloud) => {
                 if (started) return;
                 started = true;
+                hideSyncOverlay();
+                if (!fromCloud) {
+                    console.warn('Starting with local data — cloud fetch never succeeded (offline/slow connection).');
+                    showToast(currentLang === 'si'
+                        ? "⚠️ Internet එක දුර්වලයි — මෙම device එකේ save වෙච්ච data එකයි පේන්නේ. Connection එක හොඳ උනාම refresh කරන්න."
+                        : "⚠️ Weak/no connection — showing this device's local data. Refresh once your connection is better.", 'error');
+                }
                 initApp();
             };
 
-            cloudDocRef.get({ source: 'server' }).then(doc => {
-                if (doc.exists) applyCloudSnapshot(doc.data());
-                startOnce();
-            }).catch(err => {
-                console.warn('Initial cloud fetch failed, using local data:', err);
-                startOnce();
-            });
+            // Retry the initial cloud fetch a few times (with backoff) before giving up,
+            // instead of racing a single 4s attempt — slow mobile connections need longer.
+            const MAX_ATTEMPTS = 4;
+            function fetchCloudWithRetry(attempt) {
+                if (started) return;
+                showSyncOverlay(attempt, MAX_ATTEMPTS);
+                cloudDocRef.get({ source: 'server' }).then(doc => {
+                    if (doc.exists) applyCloudSnapshot(doc.data());
+                    startOnce(true);
+                }).catch(err => {
+                    console.warn(`Initial cloud fetch failed (attempt ${attempt}/${MAX_ATTEMPTS}):`, err);
+                    if (attempt < MAX_ATTEMPTS && navigator.onLine !== false) {
+                        setTimeout(() => fetchCloudWithRetry(attempt + 1), CLOUD_SYNC_TIMEOUT_MS * attempt);
+                    } else {
+                        startOnce(false);
+                    }
+                });
+            }
+            fetchCloudWithRetry(1);
 
-            setTimeout(startOnce, CLOUD_SYNC_TIMEOUT_MS);
+            // Absolute failsafe so a truly dead connection never blocks the app forever.
+            setTimeout(() => startOnce(false), CLOUD_SYNC_TIMEOUT_MS * (MAX_ATTEMPTS + 2));
+        }
+
+        /* Small full-screen overlay shown only while we're still waiting on the very
+           first cloud fetch, so a slow connection reads as "still syncing" instead of
+           silently rendering as if there's no data at all. */
+        function showSyncOverlay(attempt, maxAttempts) {
+            let el = document.getElementById('cloud-sync-overlay');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'cloud-sync-overlay';
+                el.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#0b0f1a;color:#cbd5e1;font-family:inherit;';
+                el.innerHTML = `
+                    <div style="width:32px;height:32px;border:3px solid #6366f1;border-top-color:transparent;border-radius:50%;animation:cloudSyncSpin 0.8s linear infinite;"></div>
+                    <div id="cloud-sync-overlay-text" style="font-size:13px;font-weight:600;letter-spacing:0.02em;"></div>
+                    <style>@keyframes cloudSyncSpin{to{transform:rotate(360deg)}}</style>`;
+                document.body.appendChild(el);
+            }
+            const txt = document.getElementById('cloud-sync-overlay-text');
+            if (txt) {
+                txt.textContent = (currentLang === 'si'
+                    ? `Data sync වෙනවා… (${attempt}/${maxAttempts})`
+                    : `Syncing latest data… (${attempt}/${maxAttempts})`);
+            }
+        }
+        function hideSyncOverlay() {
+            const el = document.getElementById('cloud-sync-overlay');
+            if (el) el.remove();
         }
 
         function generateOtpCode() {
@@ -2779,8 +2564,8 @@
                 showToast(currentLang === 'si' ? "වැරදි OTP අංකයකි!" : "Invalid OTP!", 'error');
                 return;
             }
-            if (!newPass || newPass.length < 6) {
-                showToast(currentLang === 'si' ? "Password අවම වශයෙන් අකුරු 6ක් වත් තිබිය යුතුයි" : "Password must be at least 6 characters", 'error');
+            if (!newPass || newPass.length < 4) {
+                showToast(currentLang === 'si' ? "Password අවම වශයෙන් අකුරු 4ක් වත් තිබිය යුතුයි" : "Password must be at least 4 characters", 'error');
                 return;
             }
             const user = users.find(u => u.username === tempResetData.username);
@@ -2790,118 +2575,11 @@
                 user.password = hash;
                 localStorage.setItem('moramaths_users', JSON.stringify(users));
                 cloudPush();
-                if (currentUser && currentUser.username === user.username) {
-                    currentUser.password = hash;
-                    localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
-                    checkDefaultPasswordWarning();
-                }
                 showToast(currentLang === 'si' ? "Password එක වෙනස් කළා! දැන් login වෙන්න." : "Password reset! You can log in now.", 'success');
                 closeForgotPasswordModal();
                 document.getElementById('login-id').value = user.username;
                 document.getElementById('login-password').value = '';
             });
-        }
-
-        /* ============ SCIENTIFIC CALCULATOR (inside LabBot panel) ============
-           Input is built exclusively from a fixed set of button clicks (never from
-           free-typed text), so evaluating the resulting expression is safe — there
-           is no path for arbitrary code to reach Function(). */
-        let calcRawExpr = '';
-        let calcAngleMode = 'DEG';
-        let calcShowingResult = false;
-
-        function toggleChatbotCalculator() {
-            const chatView = document.getElementById('chatbot-chat-view');
-            const calcView = document.getElementById('chatbot-calc-view');
-            const btn = document.getElementById('chatbot-calc-toggle-btn');
-            const showingCalc = calcView.classList.contains('hidden');
-            chatView.classList.toggle('hidden', showingCalc);
-            calcView.classList.toggle('hidden', !showingCalc);
-            btn.innerHTML = showingCalc ? '<i class="fa-solid fa-comment-dots"></i>' : '<i class="fa-solid fa-calculator"></i>';
-            btn.title = showingCalc ? 'Back to Chat' : 'Scientific Calculator';
-        }
-
-        function calcPrettify(expr) {
-            return expr
-                .replace(/\*/g, '×').replace(/\//g, '÷')
-                .replace(/sqrt\(/g, '√(').replace(/\bpi\b/g, 'π')
-                .replace(/\^/g, '^');
-        }
-
-        function calcUpdateDisplay() {
-            document.getElementById('calc-display').innerText = calcRawExpr ? calcPrettify(calcRawExpr) : '0';
-        }
-
-        function calcInput(token) {
-            if (calcShowingResult && /^[0-9.]$/.test(token) === false && token !== '(') {
-                // Continue chaining from the previous result for operators/functions.
-                calcShowingResult = false;
-            } else if (calcShowingResult) {
-                calcRawExpr = ''; // typing a fresh number after a result clears it
-                calcShowingResult = false;
-            }
-            if (token === '%') {
-                calcRawExpr = calcRawExpr.replace(/(\d+\.?\d*)$/, (m) => String(parseFloat(m) / 100));
-                calcUpdateDisplay();
-                return;
-            }
-            calcRawExpr += token;
-            document.getElementById('calc-expression').innerHTML = '&nbsp;';
-            calcUpdateDisplay();
-        }
-
-        function calcBackspace() {
-            calcRawExpr = calcRawExpr.slice(0, -1);
-            calcShowingResult = false;
-            calcUpdateDisplay();
-        }
-
-        function calcClearEntry() {
-            calcRawExpr = '';
-            calcShowingResult = false;
-            document.getElementById('calc-expression').innerHTML = '&nbsp;';
-            calcUpdateDisplay();
-        }
-
-        function calcToggleMode() {
-            calcAngleMode = calcAngleMode === 'DEG' ? 'RAD' : 'DEG';
-            document.getElementById('calc-mode-btn').innerText = calcAngleMode;
-            document.getElementById('calc-mode-indicator').innerText = calcAngleMode;
-        }
-
-        function calcSinFn(x) { return Math.sin(calcAngleMode === 'DEG' ? x * Math.PI / 180 : x); }
-        function calcCosFn(x) { return Math.cos(calcAngleMode === 'DEG' ? x * Math.PI / 180 : x); }
-        function calcTanFn(x) { return Math.tan(calcAngleMode === 'DEG' ? x * Math.PI / 180 : x); }
-
-        function calcEquals() {
-            if (!calcRawExpr) return;
-            let expr = calcRawExpr
-                .replace(/sin\(/g, 'calcSinFn(')
-                .replace(/cos\(/g, 'calcCosFn(')
-                .replace(/tan\(/g, 'calcTanFn(')
-                .replace(/log\(/g, 'Math.log10(')
-                .replace(/ln\(/g, 'Math.log(')
-                .replace(/sqrt\(/g, 'Math.sqrt(')
-                .replace(/\bpi\b/g, 'Math.PI')
-                .replace(/\^/g, '**');
-            try {
-                // Whitelist check as a second layer of defense: only digits, operators,
-                // parens, dots, and the exact known-safe identifiers may appear.
-                const safe = /^[0-9+\-*/().\s]*$|^[0-9+\-*/().\sA-Za-z]*$/.test(expr);
-                const allowedTokens = /^(calcSinFn|calcCosFn|calcTanFn|Math\.(log10|log|sqrt|PI)|[0-9+\-*/().\s])+$/;
-                if (!allowedTokens.test(expr)) throw new Error('blocked');
-                const result = Function('calcSinFn', 'calcCosFn', 'calcTanFn', 'return ' + expr)(calcSinFn, calcCosFn, calcTanFn);
-                if (!isFinite(result)) throw new Error('math error');
-                document.getElementById('calc-expression').innerText = calcPrettify(calcRawExpr) + ' =';
-                const rounded = Math.round(result * 1e10) / 1e10;
-                calcRawExpr = String(rounded);
-                calcShowingResult = true;
-                calcUpdateDisplay();
-            } catch (e) {
-                document.getElementById('calc-display').innerText = 'Error';
-                calcRawExpr = '';
-                calcShowingResult = false;
-            }
         }
 
         const megaQuotesDataset = [
@@ -3120,15 +2798,6 @@
                 otpBtn: "සත්‍යාපනය කර ලියාපදිංචි වන්න",
                 otpBtnLogin: "සත්‍යාපනය කර පිවිසෙන්න",
                 otpResend: "OTP නැවත එවන්න",
-                liveBannerLabel: "🔴 සජීවීයි (LIVE)",
-                liveBannerTitle: "පන්තිය සජීවීව පවත්වනු ලැබේ — දැන්ම එකතු වන්න!",
-                liveBannerJoin: "එකතු වන්න",
-                bulkAccessLabel: "සියලුම සිසුන්ට Access එකවර ලබා දෙන්න",
-                bulkAccessGrantBtn: "සියලුම සිසුන්ට Access ලබා දෙන්න",
-                bulkAccessRevokeBtn: "සියල්ලෙන්ම Access ඉවත් කරන්න",
-                bulkAccessNote: "මෙයින් ලියාපදිංචි සියලුම සිසුන්ගේ access එකවර තෝරාගත් දිනය දක්වා සකසයි — පසුව එක් එක් සිසුවෙකුගේ access එක වෙන වෙනම වෙනස් කළ හැක.",
-                defaultPasswordWarning: "මෙම ගිණුම තවමත් default password එකම (\"123\") භාවිත කරයි. ආරක්ෂාව සඳහා දැන්ම එය වෙනස් කරන්න.",
-                defaultPasswordWarningBtn: "Password එක වෙනස් කරන්න",
                 chartLabel: "මෙගා ප්‍රශ්නාවලී ලකුණු (%)",
                 chartBoxTitle: "සතිපතා ලකුණු ප්‍රගතිය සහ විස්තරාත්මක විශ්ලේෂණය",
                 goalsTitle: "ඉලක්ක සහ ජයග්‍රහණ",
@@ -3138,7 +2807,6 @@
                 goalsFooter: "අමතර ප්‍රශ්න පත්‍ර සහ Model Papers සඳහා පහත සති පරීක්ෂා කරන්න.",
                 leaderboardBtn: "ශ්‍රේණිගත කිරීම",
                 sidebarDashboard: "මුල් පිටුව",
-                sidebarProgress: "මගේ ප්‍රගතිය",
                 sidebarSchedule: "වේග පුනරීක්ෂණ 2026",
                 scheduleCardLabel: "වේග පුනරීක්ෂණ 2026",
                 scheduleCardSub: "සති 16 මෙගා කාලසටහන",
@@ -3195,15 +2863,6 @@
                 otpBtn: "Verify & Register",
                 otpBtnLogin: "Verify & Login",
                 otpResend: "Resend OTP",
-                liveBannerLabel: "🔴 LIVE NOW",
-                liveBannerTitle: "Class is live — join now!",
-                liveBannerJoin: "Join Now",
-                bulkAccessLabel: "Bulk Access — apply to ALL students at once",
-                bulkAccessGrantBtn: "Grant Access to All Students",
-                bulkAccessRevokeBtn: "Revoke Access from All",
-                bulkAccessNote: "This sets every registered student's access to the chosen date at once — you can still fine-tune one student individually below afterwards.",
-                defaultPasswordWarning: "This account is still using the default password (\"123\"). Change it now to keep your admin panel secure.",
-                defaultPasswordWarningBtn: "Change Password",
                 chartLabel: "Mega Quiz Marks (%)",
                 chartBoxTitle: "Weekly Marks Progress & Detailed Analysis",
                 goalsTitle: "Goals & Achievements",
@@ -3213,7 +2872,6 @@
                 goalsFooter: "Check out the weeks below for extra model papers and worksheets.",
                 leaderboardBtn: "Leaderboard",
                 sidebarDashboard: "Dashboard",
-                sidebarProgress: "My Progress",
                 sidebarSchedule: "Speed Revision 2026",
                 scheduleCardLabel: "Speed Revision 2026",
                 scheduleCardSub: "16 Week Mega Schedule",
@@ -3336,18 +2994,6 @@
         }
         function looksHashed(pw) { return typeof pw === 'string' && /^[a-f0-9]{64}$/i.test(pw); }
 
-        /* Nudges an admin to change their password if they're still on the default
-           seeded one ("123") — a common real-world weak point once a site goes live.
-           Purely a UI nudge (dismissible by simply changing the password via the
-           existing Forgot Password/OTP flow); it doesn't block access. */
-        async function checkDefaultPasswordWarning() {
-            const banner = document.getElementById('default-password-warning');
-            if (!banner || !currentUser || !isAdminUser(currentUser)) return;
-            const defaultHash = await sha256Hex('123');
-            const isDefault = currentUser.password === defaultHash || currentUser.password === '123';
-            banner.classList.toggle('hidden', !isDefault);
-        }
-
         function isAdminUser(u) { return !!u && (u.role === 'admin' || u.role === 'master_admin'); }
         function isMasterAdmin(u) { return !!u && u.role === 'master_admin'; }
 
@@ -3434,56 +3080,6 @@
             renderAdminUsersList();
             closeAccessModal();
             showToast(`${toTitleCase(u.fullname)}'s access revoked`, 'info');
-        }
-
-        function setBulkAccessPreset(months) {
-            const base = new Date();
-            base.setMonth(base.getMonth() + months);
-            document.getElementById('bulk-access-date-input').value = base.toISOString().slice(0, 10);
-        }
-
-        /* Sets EVERY registered student's paidUntil to the chosen date in one action —
-           e.g. for a free trial period, a promotion, or opening the whole course up.
-           Admin accounts are skipped (they always have access regardless). Individual
-           students can still be adjusted afterwards via their own Access button. */
-        function grantAccessToAllStudents() {
-            const val = document.getElementById('bulk-access-date-input').value;
-            if (!val) { showToast(currentLang === 'si' ? "මුලින්ම දිනයක් තෝරන්න" : "Pick a date first", 'error'); return; }
-            const students = users.filter(u => !isAdminUser(u));
-            if (!students.length) { showToast(currentLang === 'si' ? "ලියාපදිංචි සිසුන් නැත." : "No registered students yet.", 'info'); return; }
-            const msg = currentLang === 'si'
-                ? `ලියාපදිංචි සිසුන් ${students.length} දෙනාටම access එක ${val} දක්වා set කරන්නද?`
-                : `Set access until ${val} for all ${students.length} registered students?`;
-            if (!confirm(msg)) return;
-            students.forEach(u => { u.paidUntil = val; });
-            localStorage.setItem('moramaths_users', JSON.stringify(users));
-            cloudPush();
-            if (currentUser && !isAdminUser(currentUser)) {
-                currentUser.paidUntil = val;
-                localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
-                setupStudentDashboard();
-            }
-            renderAdminUsersList();
-            showToast(currentLang === 'si' ? `සිසුන් ${students.length} දෙනාටම access ලබා දෙන ලදී!` : `Access granted to all ${students.length} students!`, 'success');
-        }
-
-        function revokeAccessFromAllStudents() {
-            const students = users.filter(u => !isAdminUser(u) && u.paidUntil);
-            if (!students.length) { showToast(currentLang === 'si' ? "Active access ඇති සිසුන් නැත." : "No students currently have access set.", 'info'); return; }
-            const msg = currentLang === 'si'
-                ? `සිසුන් ${students.length} දෙනාගෙන්ම access එක ඉවත් කරන්නද?`
-                : `Revoke access from all ${students.length} students who currently have it?`;
-            if (!confirm(msg)) return;
-            students.forEach(u => { u.paidUntil = null; });
-            localStorage.setItem('moramaths_users', JSON.stringify(users));
-            cloudPush();
-            if (currentUser && !isAdminUser(currentUser)) {
-                currentUser.paidUntil = null;
-                localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
-                setupStudentDashboard();
-            }
-            renderAdminUsersList();
-            showToast(currentLang === 'si' ? `සිසුන් ${students.length} දෙනාගෙන්ම access ඉවත් කරන ලදී` : `Access revoked from ${students.length} students`, 'info');
         }
 
         let siteAssets = JSON.parse(localStorage.getItem('moramaths_site_assets')) || { heroImage: '', dashboardBanner: '' };
@@ -3610,7 +3206,6 @@
             document.getElementById('student-portal-subtitle').innerText = t.studentPortalSub;
             document.getElementById('txt-logout-btn').innerText = t.logout;
             document.getElementById('txt-sidebar-dashboard').innerText = t.sidebarDashboard;
-            document.getElementById('txt-sidebar-progress').innerText = t.sidebarProgress;
             document.getElementById('txt-sidebar-schedule').innerText = t.sidebarSchedule;
             document.getElementById('txt-schedule-card-label').innerText = t.scheduleCardLabel;
             document.getElementById('txt-schedule-card-sub').innerText = t.scheduleCardSub;
@@ -3641,31 +3236,20 @@
             document.getElementById('notif-panel-title').innerText = t.notifTitle;
             document.getElementById('hero-headline').innerHTML = t.heroHeadline;
             document.getElementById('hero-subheadline').innerText = t.heroSub;
-            document.getElementById('live-banner-label').innerText = t.liveBannerLabel;
-            document.getElementById('live-banner-title').innerText = t.liveBannerTitle;
-            document.getElementById('live-banner-join-text').innerText = t.liveBannerJoin;
-            document.getElementById('bulk-access-label').innerText = t.bulkAccessLabel;
-            document.getElementById('bulk-access-grant-btn').innerText = t.bulkAccessGrantBtn;
-            document.getElementById('bulk-access-revoke-btn').innerText = t.bulkAccessRevokeBtn;
-            document.getElementById('bulk-access-note').innerText = t.bulkAccessNote;
-            document.getElementById('default-password-warning-text').innerText = t.defaultPasswordWarning;
-            document.getElementById('default-password-warning-btn').innerText = t.defaultPasswordWarningBtn;
-            renderAdminLiveToggle();
         }
 
         let users = JSON.parse(localStorage.getItem('moramaths_users')) || [
-            { fullname: "Master Admin", email: "admin@mathlab.lk", username: "admin", password: "123", role: "master_admin", quizScores: {} },
-            { fullname: "Admin Two", email: "admin2@mathlab.lk", username: "admin2", password: "123", role: "admin", quizScores: {} },
-            { fullname: "Admin Three", email: "admin3@mathlab.lk", username: "admin3", password: "123", role: "admin", quizScores: {} }
+            { fullname: "Master Admin", email: "admin@moramaths.lk", username: "admin", password: "123", role: "master_admin", quizScores: {} },
+            { fullname: "Admin Two", email: "admin2@moramaths.lk", username: "admin2", password: "123", role: "admin", quizScores: {} },
+            { fullname: "Admin Three", email: "admin3@moramaths.lk", username: "admin3", password: "123", role: "admin", quizScores: {} }
         ];
         let currentUser = JSON.parse(localStorage.getItem('moramaths_current_user')) || null;
         let zoomData = JSON.parse(localStorage.getItem('moramaths_zoom')) || {
-            link: "https://zoom.us/j/example", id: "123 456 7890", pass: "12345", isLive: false
+            link: "https://zoom.us/j/example", id: "123 456 7890", pass: "12345"
         };
         let weeksData = JSON.parse(localStorage.getItem('moramaths_weeks')) || Array.from({length: 16}, (_, i) => ({
             week: i + 1,
             title: currentLang === 'si' ? `සතිය ${i + 1} මෙගා පුනරීක්ෂණය` : `Week ${i + 1} Mega Revision`,
-            thumbnail: "",
             isLocked: i !== 0,
             lessons: [
                 {
@@ -3692,7 +3276,6 @@
         function ensureDataIntegrity() {
             // Backfill lesson ids / quiz arrays for data saved by older versions of the app.
             weeksData.forEach(w => {
-                if (w.thumbnail === undefined) w.thumbnail = '';
                 w.lessons.forEach(l => {
                     if (!l.id) l.id = uid();
                     if (!l.quiz) l.quiz = [];
@@ -3751,7 +3334,6 @@
             document.getElementById('schedule-section').classList.add('hidden');
             document.getElementById('pastpapers-section').classList.add('hidden');
             document.getElementById('contact-section').classList.add('hidden');
-            document.getElementById('progress-section').classList.add('hidden');
             if (currentUser) {
                 document.getElementById('auth-screen-flex').classList.add('hidden');
                 document.getElementById('auth-container').classList.add('hidden');
@@ -3783,17 +3365,15 @@
                     loadAdminContactForm();
                     renderAdminMessagesInbox();
                     renderAdminSongPlaylists();
-                    checkDefaultPasswordWarning();
                     document.getElementById('admin-role-badge').innerText = isMasterAdmin(currentUser) ? 'Master Admin' : 'Admin';
-                    renderAdminStatsOverview();
                     document.querySelectorAll('.master-admin-only').forEach(el => el.classList.toggle('hidden', !isMasterAdmin(currentUser)));
-                    showAdminSection('dashboard');
                 } else {
                     document.getElementById('student-dashboard').classList.remove('hidden');
                     document.getElementById('admin-panel').classList.add('hidden');
                     document.getElementById('admin-sidebar-links').classList.add('hidden');
                     document.getElementById('student-sidebar-links').classList.remove('hidden');
                     setupStudentDashboard();
+                    renderChart();
                     document.getElementById('chatbot-launcher-wrap').classList.remove('hidden');
                 }
                 document.getElementById('user-nav-profile').classList.remove('hidden');
@@ -3968,10 +3548,6 @@
                 showToast(currentLang === 'si' ? "කරුණාකර සියලුම කොටස් පුරවන්න." : "Please fill in all fields.", 'error');
                 return;
             }
-            if (password.length < 6) {
-                showToast(currentLang === 'si' ? "Password එකේ අකුරු 6ක් වත් තිබිය යුතුය." : "Password must be at least 6 characters.", 'error');
-                return;
-            }
             if (users.some(u => u.username.toLowerCase() === username || u.email.toLowerCase() === email)) {
                 showToast(currentLang === 'si' ? "මෙම Username එකක් හෝ Email එකක් දැනටමත් භාවිත කර ඇත!" : "Username or Email already in use!", 'error');
                 return;
@@ -4054,7 +3630,6 @@
         function setupStudentDashboard() {
             const t = translations[currentLang];
             renderContactUnreadBadge();
-            renderLiveBanner();
             const formattedName = toTitleCase(currentUser.fullname);
             document.getElementById('welcome-student-name').innerText = (currentLang === 'si' ? "ආයුබෝවන්, " : "Welcome, ") + formattedName + "!";
             document.getElementById('student-avatar').innerText = formattedName.charAt(0).toUpperCase();
@@ -4304,14 +3879,8 @@
             const t = translations[currentLang];
             weeksData.forEach((w, idx) => {
                 const isLocked = w.isLocked;
-                const thumbHtml = `<div class="-m-5 mb-1 h-24 relative overflow-hidden bg-gradient-to-br from-indigo-600/20 to-purple-600/10 flex items-center justify-center text-indigo-500/40 text-2xl">
-                        <i class="fa-solid fa-image"></i>
-                        ${w.thumbnail ? `<img src="${escapeHtml(w.thumbnail)}" alt="" loading="lazy" class="absolute inset-0 w-full h-full object-cover ${isLocked ? 'grayscale opacity-50' : ''}" onerror="this.style.display='none'">` : ''}
-                        <div class="absolute inset-0 bg-gradient-to-t from-[#161224] to-transparent"></div>
-                    </div>`;
                 grid.innerHTML += `
-                    <div onclick="handleWeekClick(${idx})" class="week-thumb-wrap bg-[#161224]/80 backdrop-blur-md border ${isLocked ? 'border-slate-800/80 opacity-60' : 'border-slate-800/80 hover:border-indigo-500/60 hover:-translate-y-1'} p-5 rounded-2xl cursor-pointer transition-all duration-300 shadow-xl group space-y-3 relative overflow-hidden">
-                        ${thumbHtml}
+                    <div onclick="handleWeekClick(${idx})" class="bg-[#161224]/80 backdrop-blur-md border ${isLocked ? 'border-slate-800/80 opacity-60' : 'border-slate-800/80 hover:border-indigo-500/60 hover:-translate-y-1'} p-5 rounded-2xl cursor-pointer transition-all duration-300 shadow-xl group space-y-3 relative overflow-hidden">
                         <div class="flex justify-between items-center z-10 relative">
                             <span class="text-[10px] font-bold ${isLocked ? 'bg-[#0f0c1a] text-slate-400' : 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'} px-2.5 py-1 rounded-lg whitespace-nowrap">Week ${w.week}</span>
                             ${isLocked ? '<i class="fa-solid fa-lock text-rose-400 text-xs"></i>' : '<i class="fa-solid fa-unlock text-emerald-400 text-xs"></i>'}
@@ -4456,7 +4025,6 @@
             document.getElementById('admin-zoom-link').value = zoomData.link;
             document.getElementById('admin-zoom-id').value = zoomData.id;
             document.getElementById('admin-zoom-pass').value = zoomData.pass;
-            renderAdminLiveToggle();
         }
 
         function saveZoomDetails() {
@@ -4465,54 +4033,7 @@
             zoomData.pass = document.getElementById('admin-zoom-pass').value.trim();
             localStorage.setItem('moramaths_zoom', JSON.stringify(zoomData));
             cloudPush();
-            renderLiveBanner();
             showToast("Zoom details updated successfully!", 'success');
-        }
-
-        /* ============ LIVE BROADCAST (a "go live" flag riding on the same Zoom link) ============
-           Turning this on shows every student a pulsing "LIVE NOW" banner with a Join
-           button (using the Zoom link above) and pushes a notification, without needing
-           any separate streaming infrastructure — it's just a shared on/off flag synced
-           through the same cloud document as everything else. */
-        function renderAdminLiveToggle() {
-            const dot = document.getElementById('admin-live-toggle-dot');
-            const txt = document.getElementById('admin-live-toggle-text');
-            const btn = document.getElementById('admin-live-toggle-btn');
-            if (!btn) return;
-            const isLive = !!zoomData.isLive;
-            txt.innerText = isLive
-                ? (currentLang === 'si' ? "Live Broadcast එක නවත්වන්න" : "End Live Broadcast")
-                : (currentLang === 'si' ? "දැන් Live වන්න" : "Go Live Now");
-            dot.classList.toggle('animate-pulse', isLive);
-            btn.classList.toggle('bg-rose-600', !isLive);
-            btn.classList.toggle('hover:bg-rose-500', !isLive);
-            btn.classList.toggle('bg-slate-700', isLive);
-            btn.classList.toggle('hover:bg-slate-600', isLive);
-        }
-
-        function toggleLiveBroadcast() {
-            zoomData.isLive = !zoomData.isLive;
-            localStorage.setItem('moramaths_zoom', JSON.stringify(zoomData));
-            cloudPush();
-            renderAdminLiveToggle();
-            renderLiveBanner();
-            if (zoomData.isLive) {
-                pushNotification(currentLang === 'si' ? "🔴 Class එක Live! දැන්ම join වෙන්න." : "🔴 Class is LIVE now! Join in.");
-                showToast(currentLang === 'si' ? "Live Broadcast ආරම්භ විය — සිසුන්ට notification එවන ලදී." : "Live broadcast started — students have been notified.", 'success');
-            } else {
-                showToast(currentLang === 'si' ? "Live Broadcast නවත්වන ලදී." : "Live broadcast ended.", 'info');
-            }
-        }
-
-        /* Shows/hides the student-facing LIVE NOW banner based on zoomData.isLive. */
-        function renderLiveBanner() {
-            const banner = document.getElementById('live-broadcast-banner');
-            if (!banner) return;
-            const isLive = !!zoomData.isLive && !!currentUser && !isAdminUser(currentUser);
-            banner.classList.toggle('hidden', !isLive);
-            if (isLive) {
-                document.getElementById('live-banner-join-btn').href = zoomData.link || '#';
-            }
         }
 
         /* Uploads a chosen PDF to Firebase Storage and puts the resulting download URL
@@ -4813,42 +4334,45 @@
 
         function toggleLeaderboardView() {
             const board = document.getElementById('leaderboard-section');
+            const dash = document.getElementById('student-dashboard');
+            const gameSec = document.getElementById('game-section');
+            const scheduleSec = document.getElementById('schedule-section');
+            const papersSec = document.getElementById('pastpapers-section');
+            const contactSec = document.getElementById('contact-section');
             const showingBoard = board.classList.contains('hidden');
             if (showingBoard) {
-                hideAllMainSections();
                 renderLeaderboard();
                 board.classList.remove('hidden');
+                if (gameSec) gameSec.classList.add('hidden');
+                if (scheduleSec) scheduleSec.classList.add('hidden');
+                if (papersSec) papersSec.classList.add('hidden');
+                if (contactSec) contactSec.classList.add('hidden');
+                if (dash) dash.classList.add('hidden');
             } else {
                 board.classList.add('hidden');
-                showHomeSection();
+                if (currentUser && currentUser.username !== 'admin' && dash) dash.classList.remove('hidden');
             }
         }
 
         function toggleScheduleView() {
             const scheduleSec = document.getElementById('schedule-section');
+            const dash = document.getElementById('student-dashboard');
+            const board = document.getElementById('leaderboard-section');
+            const gameSec = document.getElementById('game-section');
+            const papersSec = document.getElementById('pastpapers-section');
+            const contactSec = document.getElementById('contact-section');
             const showing = scheduleSec.classList.contains('hidden');
             if (showing) {
-                hideAllMainSections();
                 renderWeeksGrid();
                 scheduleSec.classList.remove('hidden');
+                if (board) board.classList.add('hidden');
+                if (gameSec) gameSec.classList.add('hidden');
+                if (papersSec) papersSec.classList.add('hidden');
+                if (contactSec) contactSec.classList.add('hidden');
+                if (dash) dash.classList.add('hidden');
             } else {
                 scheduleSec.classList.add('hidden');
-                showHomeSection();
-            }
-        }
-
-        function toggleProgressView() {
-            const progressSec = document.getElementById('progress-section');
-            const showing = progressSec.classList.contains('hidden');
-            if (showing) {
-                hideAllMainSections();
-                progressSec.classList.remove('hidden');
-                // Chart.js sizes itself off the canvas's on-screen dimensions, which are
-                // zero while its container is hidden — re-render now that it's visible.
-                if (currentUser && !isAdminUser(currentUser)) renderChart();
-            } else {
-                progressSec.classList.add('hidden');
-                showHomeSection();
+                if (currentUser && !isAdminUser(currentUser) && dash) dash.classList.remove('hidden');
             }
         }
 
@@ -4874,28 +4398,56 @@
 
         function toggleGameView() {
             const gameSec = document.getElementById('game-section');
+            const dash = document.getElementById('student-dashboard');
+            const admin = document.getElementById('admin-panel');
+            const board = document.getElementById('leaderboard-section');
+            const scheduleSec = document.getElementById('schedule-section');
+            const papersSec = document.getElementById('pastpapers-section');
+            const contactSec = document.getElementById('contact-section');
             const showing = gameSec.classList.contains('hidden');
             if (showing) {
-                hideAllMainSections();
+                if (board) board.classList.add('hidden');
+                if (scheduleSec) scheduleSec.classList.add('hidden');
+                if (papersSec) papersSec.classList.add('hidden');
+                if (contactSec) contactSec.classList.add('hidden');
                 backToGameLevels();
                 gameSec.classList.remove('hidden');
+                if (dash) dash.classList.add('hidden');
+                if (admin) admin.classList.add('hidden');
             } else {
                 gameSec.classList.add('hidden');
-                showHomeSection();
+                if (currentUser) {
+                    if (isAdminUser(currentUser) && admin) admin.classList.remove('hidden');
+                    else if (dash) dash.classList.remove('hidden');
+                }
             }
         }
 
         /* ============ PAST PAPERS (year-by-year, publish-controlled) ============ */
         function togglePastPapersView() {
             const papersSec = document.getElementById('pastpapers-section');
+            const dash = document.getElementById('student-dashboard');
+            const admin = document.getElementById('admin-panel');
+            const board = document.getElementById('leaderboard-section');
+            const scheduleSec = document.getElementById('schedule-section');
+            const gameSec = document.getElementById('game-section');
+            const contactSec = document.getElementById('contact-section');
             const showing = papersSec.classList.contains('hidden');
             if (showing) {
-                hideAllMainSections();
+                if (board) board.classList.add('hidden');
+                if (scheduleSec) scheduleSec.classList.add('hidden');
+                if (gameSec) gameSec.classList.add('hidden');
+                if (contactSec) contactSec.classList.add('hidden');
                 renderPastPapersView();
                 papersSec.classList.remove('hidden');
+                if (dash) dash.classList.add('hidden');
+                if (admin) admin.classList.add('hidden');
             } else {
                 papersSec.classList.add('hidden');
-                showHomeSection();
+                if (currentUser) {
+                    if (isAdminUser(currentUser) && admin) admin.classList.remove('hidden');
+                    else if (dash) dash.classList.remove('hidden');
+                }
             }
         }
 
@@ -5043,14 +4595,28 @@
         /* ============ CONTACT US (master-admin sets links; students see buttons + can message admin) ============ */
         function toggleContactView() {
             const contactSec = document.getElementById('contact-section');
+            const dash = document.getElementById('student-dashboard');
+            const admin = document.getElementById('admin-panel');
+            const board = document.getElementById('leaderboard-section');
+            const scheduleSec = document.getElementById('schedule-section');
+            const gameSec = document.getElementById('game-section');
+            const papersSec = document.getElementById('pastpapers-section');
             const showing = contactSec.classList.contains('hidden');
             if (showing) {
-                hideAllMainSections();
+                if (board) board.classList.add('hidden');
+                if (scheduleSec) scheduleSec.classList.add('hidden');
+                if (gameSec) gameSec.classList.add('hidden');
+                if (papersSec) papersSec.classList.add('hidden');
                 renderContactView();
                 contactSec.classList.remove('hidden');
+                if (dash) dash.classList.add('hidden');
+                if (admin) admin.classList.add('hidden');
             } else {
                 contactSec.classList.add('hidden');
-                showHomeSection();
+                if (currentUser) {
+                    if (isAdminUser(currentUser) && admin) admin.classList.remove('hidden');
+                    else if (dash) dash.classList.remove('hidden');
+                }
             }
         }
 
@@ -5216,7 +4782,6 @@
         function renderAdminMessagesInbox() {
             const wrap = document.getElementById('admin-messages-inbox');
             if (!wrap) return;
-            renderAdminStatsOverview();
             const usernames = Object.keys(studentMessages).filter(u => (studentMessages[u] || []).length > 0);
             if (!usernames.length) { wrap.innerHTML = '<p class="text-[10px] text-slate-600 italic">No messages from students yet.</p>'; return; }
             wrap.innerHTML = usernames.map(uname => {
@@ -5269,44 +4834,6 @@
             openAdminMessageThread(viewedMessageThreadUsername);
         }
 
-        /* Clears one student's entire conversation (both directions) — for that student,
-           it's as if they never messaged the admin. Requires confirmation since it can't
-           be undone once synced. */
-        function clearMessageThread() {
-            if (!viewedMessageThreadUsername) return;
-            const student = users.find(u => u.username === viewedMessageThreadUsername);
-            const name = student ? toTitleCase(student.fullname) : viewedMessageThreadUsername;
-            const msg = currentLang === 'si'
-                ? `${name} සමග ඇති සියලුම පණිවිඩ ස්ථිරවම මකා දමන්නද? මෙය ආපසු හැරවිය නොහැක.`
-                : `Permanently delete the entire conversation with ${name}? This cannot be undone.`;
-            if (!confirm(msg)) return;
-            delete studentMessages[viewedMessageThreadUsername];
-            localStorage.setItem('moramaths_messages', JSON.stringify(studentMessages));
-            cloudPush();
-            document.getElementById('admin-message-thread-wrap').classList.add('hidden');
-            viewedMessageThreadUsername = null;
-            renderAdminMessagesInbox();
-            showToast(currentLang === 'si' ? "සංවාදය මකා දමන ලදී" : "Conversation cleared", 'success');
-        }
-
-        /* Wipes every student's message thread — a full inbox reset. Separate from
-           clearMessageThread() (which only clears the one thread currently open). */
-        function clearAllMessageThreads() {
-            const count = Object.keys(studentMessages).filter(u => (studentMessages[u] || []).length > 0).length;
-            if (!count) { showToast(currentLang === 'si' ? "පණිවිඩ නොමැත." : "No messages to clear.", 'info'); return; }
-            const msg = currentLang === 'si'
-                ? `සියලුම සිසුන්ගේ (${count}) සංවාද ස්ථිරවම මකා දමන්නද? මෙය ආපසු හැරවිය නොහැක.`
-                : `Permanently delete ALL ${count} student conversations? This cannot be undone.`;
-            if (!confirm(msg)) return;
-            studentMessages = {};
-            localStorage.setItem('moramaths_messages', JSON.stringify(studentMessages));
-            cloudPush();
-            document.getElementById('admin-message-thread-wrap').classList.add('hidden');
-            viewedMessageThreadUsername = null;
-            renderAdminMessagesInbox();
-            showToast(currentLang === 'si' ? "සියලුම සංවාද මකා දමන ලදී" : "All conversations cleared", 'success');
-        }
-
         /* ============ LabBot — RULE-BASED FAQ CHATBOT ============
            No external AI/API is used here on purpose: this file is a public static page
            hosted on Netlify, so any real API key baked into it could be read straight out
@@ -5355,67 +4882,12 @@
             { keywords: ['mean median mode', 'මධ්‍යනය', 'මධ්‍යස්ථය', 'බහුලකය', 'average'],
               answer: 'Mean (මධ්‍යනය) = සියල්ල එකතු කර ගණන බෙදන්න. Median (මධ්‍යස්ථය) = අනුපිළිවෙලට තැබූ විට මැද අගය. Mode (බහුලකය) = වැඩිපුරම පුනරාවර්තනය වන අගය.' },
             { keywords: ['probability', 'සම්භාවිතාව', 'chance'],
-              answer: 'සම්භාවිතාව = (අවශ්‍ය ප්‍රතිඵල ගණන) ÷ (හැකි සියලුම ප්‍රතිඵල ගණන)' },
-            { keywords: ['calculator', 'ගණකය', 'scientific calculator', 'calc'],
-              answer: 'Scientific Calculator එකක් මේ chat window එකේම තියෙනවා — උඩින් 🖩 icon එක click කරන්න!' },
-            { keywords: ['syllabus', 'chapters', 'පාඩම් මාලාව', 'වාරය', 'චැප්ටර්', 'topics list'],
-              answer: 'O/L Maths Syllabus එක වාර 3කට බෙදිලා: 1 වාරය — පරිමිතිය, වර්ගමූලය, භාග, ද්විපද ප්‍රකාශන, ත්‍රිකෝණ අංගසාම්පත, වර්ගඵලය, සාධක, ත්‍රිකෝණ I & II, ප්‍රතිලෝම සමානුපාත, දත්ත නිරූපණය, LCM. 2 වාරය — විජ්‍ය භාග, ප්‍රතිශතය, සමීකරණ, සමාන්තරාශ්‍රි I & II, ලඝුගණක I & II, ප්‍රස්ථාර. 3 වාරය — සමාන්තර ශ්‍රේණි, අසමානතා, සංඛ්‍යාත ව්‍යාප්තිය, නිර්මාණ, පෘෂ්ඨ වර්ගඵලය හා පරිමාව, සම්භාවිතාව, පරිමාණ රූප. විස්තර සඳහා Sidebar → Speed Revision 2026 බලන්න.' },
-            { keywords: ['perimeter', 'පරිමිතිය'],
-              answer: 'පරිමිතිය = හැඩයක සියලුම පැති දිග එකතුව. සෘජාස්‍රයක් සඳහා: 2×(දිග + පළල). වර්ගයක් සඳහා: 4 × පැත්තේ දිග.' },
-            { keywords: ['square root', 'වර්ගමූලය'],
-              answer: 'වර්ගමූලය (√) යනු තමන් සමඟම ගුණ කළ විට එම සංඛ්‍යාවම ලැබෙන අගයයි. උදා: √25 = 5, මොකද 5×5 = 25.' },
-            { keywords: ['fractions', 'භාග', 'භාග ගණිතය'],
-              answer: 'භාග එකතු/අඩු කරන්න: හරය සමාන කරගන්න. ගුණ කරන්න: ලවයෙන් ලවය, හරයෙන් හරය. බෙදන්න: දෙවන භාගය invert කරලා ගුණ කරන්න.' },
-            { keywords: ['congruent triangles', 'ත්‍රිකෝණ අංගසාම්පත', 'congruence'],
-              answer: 'ත්‍රිකෝණ දෙකක් අංගසම්පාත වන්නේ: SSS (පැති 3ම සමාන), SAS (පැති 2ක් + ඒවා අතර කෝණය), ASA (කෝණ 2ක් + ඒවා අතර පැත්ත), හෝ RHS (කර්ණය + පැත්තක්) සම වූ විටයි.' },
-            { keywords: ['factorization', 'සාධක', 'factorise', 'factoring'],
-              answer: 'සාධක වශයෙන් දැක්වීම: පොදු සාධකය පිටතට ගන්න (a b + a c = a(b+c)), හෝ වර්ග දෙකක වෙනස භාවිත කරන්න: a² - b² = (a+b)(a-b).' },
-            { keywords: ['inverse proportion', 'ප්‍රතිලෝම සමානුපාත'],
-              answer: 'ප්‍රතිලෝම සමානුපාතයේදී x වැඩි වෙනකොට y අඩු වෙනවා, එහෙත් x × y = නියතයක් (constant) විදිහට රැඳේ.' },
-            { keywords: ['lcm', 'බහුලම පොදු ගුණාකාරය', 'lowest common multiple'],
-              answer: 'විජ්‍ය ප්‍රකාශනවල LCM (බහුලම පොදු ගුණාකාරය) හොයන්නේ එක් එක් ප්‍රකාශනය සාධක වශයෙන් දක්වලා, පොදු සහ අනිකුත් සියලුම සාධක එකට ගුණ කරලා.' },
-            { keywords: ['algebraic fractions', 'විජ්‍ය භාග'],
-              answer: 'විජ්‍ය භාග සරල කරන්න: ලවයයි හරයයි දෙකම සාධක වශයෙන් දක්වලා පොදු සාධක කපාගන්න.' },
-            { keywords: ['equations', 'සමීකරණ', 'solve for x'],
-              answer: 'සමීකරණයක් විසඳන්න: දෙපැත්තටම එකම දෙය කරන්න (එකතු/අඩු/ගුණ/බෙදන්න) x හුදකලා වෙනකම්.' },
-            { keywords: ['parallel lines', 'සමාන්තරාශ්‍රි', 'alternate angles', 'corresponding angles'],
-              answer: 'සමාන්තර රේඛා 2ක් transversal එකකින් කැපුනාම: Alternate angles සමාන වේ, Corresponding angles සමාන වේ, Co-interior angles එකතුව 180° වේ.' },
-            { keywords: ['logarithm', 'ලඝුගණක', 'log rules'],
-              answer: 'ලඝුගණක නීති: log(a×b) = log a + log b, log(a÷b) = log a − log b, log(aⁿ) = n×log a.' },
-            { keywords: ['arithmetic progression', 'සමාන්තර ශ්‍රේණි', 'ap formula', 'nth term'],
-              answer: 'සමාන්තර ශ්‍රේණියේ nවන පදය: a + (n-1)d. පළමු n පද වල එකතුව: (n/2)×[2a + (n-1)d]. (a=පළමු පදය, d=පොදු වෙනස)' },
-            { keywords: ['inequalities', 'අසමානතා'],
-              answer: 'අසමානතාවක් සෘණ සංඛ්‍යාවකින් ගුණ/බෙදන විට, අසමානතා ලකුණ දිශාව මාරු වෙනවා (< බවට > වගේ).' },
-            { keywords: ['frequency distribution', 'සංඛ්‍යාත ව්‍යාප්තිය', 'grouped mean'],
-              answer: 'සංඛ්‍යාත ව්‍යාප්තියක Mean = Σ(f×x) ÷ Σf (f=සංඛ්‍යාතය, x=class මධ්‍ය අගය).' },
-            { keywords: ['construction', 'නිර්මාණ', 'compass construction'],
-              answer: 'නිර්මාණ (Constructions) සඳහා compass එකයි, ruler එකයි විතරයි use කරන්නේ — protractor එකෙන් කෝණ මැනීම වළක්වන්න. Lesson viewer එකේ step-by-step diagram බලන්න.' },
-            { keywords: ['surface area', 'volume', 'පෘෂ්ඨ වර්ගඵලය', 'පරිමාව', 'cylinder', 'cuboid'],
-              answer: 'ඝනකයක පරිමාව = පැත්ත³. Cuboid එකක පරිමාව = දිග×පළල×උස. Cylinder එකක පරිමාව = πr²h, පෘෂ්ඨ වර්ගඵලය = 2πr(r+h).' },
-            { keywords: ['scale drawing', 'පරිමාණ රූප', 'scale ratio'],
-              answer: 'පරිමාණ රූපයක Scale = රූපයේ මිනුම : සැබෑ මිනුම. උදා: 1:100 කියන්නේ රූපයේ 1cm එක සැබෑව 100cm (1m) කියලා.' },
-            { keywords: ['algebraic expressions', 'ද්විපද ප්‍රකාශන', 'binomial', 'expand brackets'],
-              answer: 'ද්විපද ප්‍රකාශන (Binomial Expansion): (a+b)² = a² + 2ab + b². (a-b)² = a² - 2ab + b². (a+b)(a-b) = a² - b² (Difference of Two Squares).' },
-            { keywords: ['area', 'වර්ගඵලය', 'area of triangle', 'area of parallelogram'],
-              answer: 'වර්ගඵල සූත්‍ර: සෘජාස්‍රය = දිග×පළල. ත්‍රිකෝණය = ½×පාදය×උස. සමාන්තරාස්‍රය = පාදය×උස. Trapezium = ½×(සමාන්තර පාද දෙකේ එකතුව)×උස.' },
-            { keywords: ['triangle angles', 'ත්‍රිකෝණ i', 'ත්‍රිකෝණ ii', 'angle sum triangle', 'exterior angle', 'isosceles triangle'],
-              answer: 'ත්‍රිකෝණයක අභ්‍යන්තර කෝණ 3ේ එකතුව සෑම විටම 180°. Isosceles ත්‍රිකෝණයක පාද 2ක් සමාන නම් ඒවාට විරුද්ධ කෝණත් සමාන වේ. Exterior Angle = ඉවත් වූ දෙපැත්තේ interior කෝණ 2ක එකතුව.' },
-            { keywords: ['data representation', 'දත්ත නිරූපණය', 'bar chart', 'pictograph', 'pie chart'],
-              answer: 'දත්ත නිරූපණය කරන්නේ: Pictograph (සංකේත වලින්), Bar Chart (දිග කූරු වලින්), Pie Chart (කවයක කොටස් වලින්), හෝ Frequency Table (සංඛ්‍යාත වගුවකින්).' },
-            { keywords: ['graphs', 'ප්‍රස්ථාර', 'linear graph', 'straight line graph', 'gradient'],
-              answer: 'රේඛීය ප්‍රස්ථාරයක සමීකරණය: y = mx + c (m = ශ්‍රේණිය/gradient, c = y-අක්ෂය කපන ලක්ෂ්‍යය). ශ්‍රේණිය m = (y₂-y₁) ÷ (x₂-x₁).' },
-            { keywords: ['formulae', 'සූත්‍ර', 'change of subject', 'rearranging formula', 'subject of formula'],
-              answer: 'සූත්‍රයක විෂය මාරු කිරීම (Change of Subject): සමීකරණයක් විසඳන ආකාරයටම, දෙපැත්තටම එකම ක්‍රියාව කරන්න, අවශ්‍ය අකුර හුදකලා වෙනකම්.' },
-            { keywords: ['locus', 'ස්ථානීය ජ්‍යාමිතිය', 'path of point'],
-              answer: 'Locus (ස්ථානීය රේඛාව) කියන්නේ දී ඇති කොන්දේසියක් සපුරාලන ලක්ෂ්‍ය සියල්ලේ පථයයි. උදා: ලක්ෂ්‍ය 2ක සිට සමාන දුරින් ඇති ලක්ෂ්‍ය පථය = ඒ ලක්ෂ්‍ය දෙක ම ෙකලින් රේඛාවේ perpendicular bisector එක.' },
-            { keywords: ['circle angles', 'වෘත්තාකාර කෝණ', 'angle in semicircle', 'cyclic quadrilateral', 'angle at center'],
-              answer: 'වෘත්ත කෝණ නීති: වෘත්ත මධ්‍යයේ කෝණය = පරිධියේ කෝණයට දෙගුණයකි. අර්ධවෘත්තයක කෝණය සෑම විටම 90°. Cyclic Quadrilateral එකක විරුද්ධ කෝණවල එකතුව 180°.' }
+              answer: 'සම්භාවිතාව = (අවශ්‍ය ප්‍රතිඵල ගණන) ÷ (හැකි සියලුම ප්‍රතිඵල ගණන)' }
         ];
 
         const chatbotSuggestionChips = [
             { label: 'Quiz කරන්නෙ කොහොමද?', text: 'quiz කරන්නෙ කොහොමද' },
             { label: 'Pythagoras Theorem', text: 'pythagoras' },
-            { label: 'Syllabus එක මොකක්ද?', text: 'syllabus' },
             { label: 'Admin ට කතා කරන්නෙ කොහොමද?', text: 'admin ට කතා කරන්නෙ කොහොමද' },
             { label: 'Focus Mode එක', text: 'focus mode' }
         ];
@@ -5801,7 +5273,6 @@
         function renderAdminWeeksManager() {
             const wrap = document.getElementById('admin-weeks-manager');
             if (!wrap) return;
-            renderAdminStatsOverview();
             wrap.innerHTML = weeksData.map((w, wi) => `
                 <div class="bg-[#0f0c1a] border border-slate-800 rounded-2xl p-4 space-y-3 shadow-inner">
                     <div class="flex items-center justify-between gap-2">
@@ -5809,13 +5280,6 @@
                         <button onclick="toggleWeekLock(${wi})" class="shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-lg border ${w.isLocked ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'} cursor-pointer transition">
                             <i class="fa-solid ${w.isLocked ? 'fa-lock' : 'fa-unlock'}"></i> ${w.isLocked ? 'Locked' : 'Unlocked'}
                         </button>
-                    </div>
-                    <div class="flex items-center gap-2.5 bg-[#161224] border border-slate-800 rounded-xl px-3 py-2">
-                        <div class="w-12 h-9 rounded-lg overflow-hidden shrink-0 bg-indigo-600/10 flex items-center justify-center text-indigo-500/50 text-xs border border-slate-800">
-                            ${w.thumbnail ? `<img src="${escapeHtml(w.thumbnail)}" class="w-full h-full object-cover" onerror="this.style.display='none'">` : `<i class="fa-solid fa-image"></i>`}
-                        </div>
-                        <input value="${escapeHtml(w.thumbnail || '')}" onchange="setWeekThumbnail(${wi}, this.value)" placeholder="${currentLang === 'si' ? 'Thumbnail image link (URL) එකක් paste කරන්න...' : 'Paste thumbnail image URL...'}" class="bg-transparent text-[11px] text-slate-300 flex-1 min-w-0 focus:outline-none">
-                        ${w.thumbnail ? `<button onclick="setWeekThumbnail(${wi}, '')" title="Remove thumbnail" class="shrink-0 w-6 h-6 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white flex items-center justify-center text-[10px] cursor-pointer transition"><i class="fa-solid fa-xmark"></i></button>` : ''}
                     </div>
                     <div class="space-y-1.5">
                         ${w.lessons.map(l => `
@@ -5830,15 +5294,6 @@
                     </div>
                 </div>
             `).join('');
-        }
-
-        function setWeekThumbnail(weekIdx, url) {
-            weeksData[weekIdx].thumbnail = url.trim();
-            localStorage.setItem('moramaths_weeks', JSON.stringify(weeksData));
-            cloudPush();
-            renderWeeksGrid();
-            renderAdminWeeksManager();
-            showToast(url.trim() ? "Thumbnail updated" : "Thumbnail removed", 'success');
         }
 
         function renameWeek(weekIdx, newTitle) {
@@ -5977,7 +5432,6 @@
             const wrap = document.getElementById('admin-users-list');
             if (!wrap) return;
             const students = users.filter(u => !isAdminUser(u));
-            renderAdminStatsOverview();
             document.getElementById('admin-user-count').innerText = students.length;
             if (!students.length) { wrap.innerHTML = '<p class="text-[10px] text-slate-600 italic">No students registered yet.</p>'; return; }
             wrap.innerHTML = students.map(u => {
@@ -6144,20 +5598,15 @@
 
         async function createAdminAccount() {
             const fullname = toTitleCase(document.getElementById('new-admin-name').value.trim());
-            const emailInput = document.getElementById('new-admin-email').value.trim().toLowerCase();
             const username = document.getElementById('new-admin-username').value.trim().toLowerCase();
             const password = document.getElementById('new-admin-password').value.trim();
-            if (!fullname || !emailInput || !username || !password) { showToast("Fill in all fields to add an admin", 'error'); return; }
-            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput)) { showToast("Enter a valid email address", 'error'); return; }
-            if (password.length < 6) { showToast("Password must be at least 6 characters", 'error'); return; }
+            if (!fullname || !username || !password) { showToast("Fill in all fields to add an admin", 'error'); return; }
             if (users.some(u => u.username.toLowerCase() === username)) { showToast("Username already in use", 'error'); return; }
-            if (users.some(u => u.email.toLowerCase() === emailInput)) { showToast("Email already in use", 'error'); return; }
             const hashedPassword = await sha256Hex(password);
-            users.push({ fullname, email: emailInput, username, password: hashedPassword, role: 'admin', quizScores: {}, gameProgress: { unlocked: 1, scores: {} } });
+            users.push({ fullname, email: `${username}@moramaths.lk`, username, password: hashedPassword, role: 'admin', quizScores: {}, gameProgress: { unlocked: 1, scores: {} } });
             localStorage.setItem('moramaths_users', JSON.stringify(users));
             cloudPush();
             document.getElementById('new-admin-name').value = '';
-            document.getElementById('new-admin-email').value = '';
             document.getElementById('new-admin-username').value = '';
             document.getElementById('new-admin-password').value = '';
             renderAdminAccountsList();
@@ -6215,7 +5664,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `mathlab-backup-${new Date().toISOString().slice(0, 10)}.json`;
+            a.download = `moramaths-backup-${new Date().toISOString().slice(0, 10)}.json`;
             document.body.appendChild(a);
             a.click();
             a.remove();
