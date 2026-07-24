@@ -2117,6 +2117,12 @@
                 <button onclick="confirmPasswordReset()" id="fp-reset-btn" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-3 rounded-xl transition shadow-lg cursor-pointer">Password එක වෙනස් කරන්න</button>
                 <button onclick="resendForgotPasswordOtp()" class="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition cursor-pointer mt-3"><i class="fa-solid fa-rotate-right mr-1"></i> Resend OTP</button>
             </div>
+
+            <div id="fp-step-firebase-sent" class="hidden">
+                <h3 class="text-sm font-black text-white mb-1.5">Email එක check කරන්න!</h3>
+                <p class="text-xs text-slate-400 leading-relaxed mb-4">Password reset කරගන්න link එකක් ඔබේ email එකට එවා ඇත. ඒ link එක click කරලා අලුත් password එකක් set කරගන්න, ඊට පස්සේ මෙතනින් login වෙන්න.</p>
+                <button onclick="closeForgotPasswordModal()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 rounded-xl transition shadow-lg cursor-pointer">හරි (OK)</button>
+            </div>
         </div>
     </div>
     <div id="week-modal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
@@ -2953,6 +2959,7 @@
         function openForgotPasswordModal() {
             document.getElementById('fp-step-email').classList.remove('hidden');
             document.getElementById('fp-step-reset').classList.add('hidden');
+            document.getElementById('fp-step-firebase-sent').classList.add('hidden');
             document.getElementById('fp-email-input').value = document.getElementById('login-id').value.includes('@') ? document.getElementById('login-id').value.trim() : '';
             document.getElementById('forgot-password-modal').classList.remove('hidden');
         }
@@ -2969,15 +2976,40 @@
             if (!found) { showToast(currentLang === 'si' ? "මෙම Email එකට ගිණුමක් නැත" : "No account found with this email", 'error'); return; }
             if (found.banned) { closeForgotPasswordModal(); showBannedAccountMessage(); return; }
 
-            const otpCode = generateOtpCode();
-            tempResetData = { email: found.email, username: found.username, otp: otpCode };
-
             formBusy = true;
             const btn = document.getElementById('fp-send-btn');
             const original = btn.innerText;
             btn.disabled = true;
             btn.classList.add('opacity-60', 'cursor-not-allowed');
             btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1"></i> ${currentLang === 'si' ? 'එවමින්...' : 'Sending...'}`;
+
+            // Accounts already migrated to real Firebase Authentication have no local
+            // password field left for us to verify/replace — the only client-side-safe
+            // way to reset a password you can't currently sign in with is Firebase's own
+            // reset-email flow (it issues a signed, time-limited reset link). Legacy
+            // accounts (not migrated yet) keep our own OTP flow below, which doubles as
+            // their migration the moment they set a new password.
+            if (!found.password && firebaseReady) {
+                firebase.auth().sendPasswordResetEmail(found.email)
+                    .then(() => {
+                        document.getElementById('fp-step-email').classList.add('hidden');
+                        document.getElementById('fp-step-firebase-sent').classList.remove('hidden');
+                    })
+                    .catch(err => {
+                        console.warn('Firebase password reset email error:', err);
+                        showToast(currentLang === 'si' ? "OTP එවීමට අසමත් විය. නැවත උත්සාහ කරන්න." : "Couldn't send the reset email. Please try again.", 'error');
+                    })
+                    .finally(() => {
+                        formBusy = false;
+                        btn.disabled = false;
+                        btn.classList.remove('opacity-60', 'cursor-not-allowed');
+                        btn.innerText = original;
+                    });
+                return;
+            }
+
+            const otpCode = generateOtpCode();
+            tempResetData = { email: found.email, username: found.username, otp: otpCode };
 
             sendOtpEmail(found.email, toTitleCase(found.fullname), otpCode)
                 .then(() => {
@@ -3008,7 +3040,7 @@
                 .catch(err => showToast(getOtpFailureMessage(err), 'error'));
         }
 
-        function confirmPasswordReset() {
+        async function confirmPasswordReset() {
             if (!tempResetData) { showToast("Session expired — please start again.", 'error'); openForgotPasswordModal(); return; }
             const enteredOtp = document.getElementById('fp-otp-input').value.trim();
             const newPass = document.getElementById('fp-newpass-input').value;
@@ -3023,20 +3055,62 @@
             const user = users.find(u => u.username === tempResetData.username);
             if (!user) { showToast("Account not found", 'error'); return; }
 
-            sha256Hex(newPass).then(hash => {
-                user.password = hash;
-                localStorage.setItem('moramaths_users', JSON.stringify(users));
-                cloudPush();
-                if (currentUser && currentUser.username === user.username) {
-                    currentUser.password = hash;
-                    localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
-                    checkDefaultPasswordWarning();
+            const btn = document.getElementById('fp-reset-btn');
+            const original = btn.innerText;
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin mr-1"></i>`;
+
+            // This account hasn't been migrated to real Firebase Authentication yet
+            // (that's why we're here rather than Firebase's own reset-email flow) —
+            // setting a new password now is also the moment we create their real
+            // Firebase Auth account, using this password, and drop our own hash for good.
+            if (firebaseReady && user.email) {
+                try {
+                    await firebase.auth().createUserWithEmailAndPassword(user.email, newPass);
+                    delete user.password;
+                    delete user.salt;
+                } catch (err) {
+                    if (err && err.code === 'auth/email-already-in-use') {
+                        // Already migrated on another device in the meantime — fall back
+                        // to Firebase's own reset email so they can still set a new one.
+                        try {
+                            await firebase.auth().sendPasswordResetEmail(user.email);
+                            delete user.password;
+                            delete user.salt;
+                            localStorage.setItem('moramaths_users', JSON.stringify(users));
+                            cloudPush();
+                            btn.disabled = false;
+                            btn.innerText = original;
+                            document.getElementById('fp-step-reset').classList.add('hidden');
+                            document.getElementById('fp-step-firebase-sent').classList.remove('hidden');
+                            return;
+                        } catch (err2) { console.warn('Fallback reset email failed:', err2); }
+                    } else {
+                        console.warn('Could not migrate this account to Firebase Auth during reset:', err);
+                    }
                 }
-                showToast(currentLang === 'si' ? "Password එක වෙනස් කළා! දැන් login වෙන්න." : "Password reset! You can log in now.", 'success');
-                closeForgotPasswordModal();
-                document.getElementById('login-id').value = user.username;
-                document.getElementById('login-password').value = '';
-            });
+            } else {
+                // Offline / Firebase unavailable — fall back to our own hash so the
+                // account still isn't left completely unable to log in.
+                const { password: hash, salt } = await hashNewPassword(newPass);
+                user.password = hash;
+                user.salt = salt;
+            }
+
+            localStorage.setItem('moramaths_users', JSON.stringify(users));
+            cloudPush();
+            if (currentUser && currentUser.username === user.username) {
+                currentUser.password = user.password;
+                currentUser.salt = user.salt;
+                localStorage.setItem('moramaths_current_user', JSON.stringify(currentUser));
+                checkDefaultPasswordWarning();
+            }
+            btn.disabled = false;
+            btn.innerText = original;
+            showToast(currentLang === 'si' ? "Password එක වෙනස් කළා! දැන් login වෙන්න." : "Password reset! You can log in now.", 'success');
+            closeForgotPasswordModal();
+            document.getElementById('login-id').value = user.username;
+            document.getElementById('login-password').value = '';
         }
 
         /* ============ SCIENTIFIC CALCULATOR (inside LabBot panel) ============
@@ -3560,11 +3634,15 @@
         }
 
         /* ============ SECURITY: password hashing ============
-           Passwords are hashed with SHA-256 (Web Crypto) before ever being
+           Passwords are hashed with salted SHA-256 (Web Crypto) before ever being
            saved to localStorage/Firestore, instead of stored as plain text.
-           looksHashed() lets old accounts created before this update (plain
-           text) keep working — they're transparently upgraded to a hash the
-           next time that student logs in successfully. */
+           Salting means two students who happen to pick the same password end up
+           with completely different stored hashes, and a precomputed "rainbow
+           table" of common-password hashes is useless against this data.
+           looksHashed() + the presence of u.salt let old accounts created before
+           each of these updates keep working — they're transparently upgraded
+           (plaintext → hash → salted hash) the next time that student logs in
+           successfully. */
         async function sha256Hex(str) {
             if (!window.crypto || !window.crypto.subtle) return str; // insecure context (e.g. file://) — no hashing available, falls back to plain text
             const enc = new TextEncoder().encode(str);
@@ -3572,6 +3650,39 @@
             return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
         }
         function looksHashed(pw) { return typeof pw === 'string' && /^[a-f0-9]{64}$/i.test(pw); }
+        // A random-per-user salt, mixed into the password before hashing.
+        function makeSalt() {
+            if (!window.crypto || !window.crypto.getRandomValues) return Date.now().toString(16) + Math.random().toString(16).slice(2);
+            const arr = new Uint8Array(16);
+            crypto.getRandomValues(arr);
+            return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+        async function hashPasswordSalted(pw, salt) { return sha256Hex(salt + ':' + pw); }
+        // Hashes a brand-new password for a brand-new account (always salted from creation).
+        async function hashNewPassword(pw) {
+            const salt = makeSalt();
+            const password = await hashPasswordSalted(pw, salt);
+            return { password, salt };
+        }
+        // Verifies a typed password against a stored record, whatever generation of
+        // hashing that record was created under, and returns { valid, upgrade } where
+        // `upgrade` (if present) is { password, salt } to write back so this record
+        // is on the current (salted) scheme from now on.
+        async function verifyPassword(pass, record) {
+            if (record.salt) {
+                const valid = (await hashPasswordSalted(pass, record.salt)) === record.password;
+                return { valid };
+            }
+            if (looksHashed(record.password)) {
+                const valid = (await sha256Hex(pass)) === record.password;
+                if (!valid) return { valid: false };
+                return { valid: true, upgrade: await hashNewPassword(pass) };
+            }
+            // legacy plain-text account from before hashing existed at all
+            const valid = record.password === pass;
+            if (!valid) return { valid: false };
+            return { valid: true, upgrade: await hashNewPassword(pass) };
+        }
 
         /* Nudges an admin to change their password if they're still on the default
            seeded one ("123") — a common real-world weak point once a site goes live.
@@ -3580,8 +3691,7 @@
         async function checkDefaultPasswordWarning() {
             const banner = document.getElementById('default-password-warning');
             if (!banner || !currentUser || !isAdminUser(currentUser)) return;
-            const defaultHash = await sha256Hex('123');
-            const isDefault = currentUser.password === defaultHash || currentUser.password === '123';
+            const { valid: isDefault } = await verifyPassword('123', currentUser);
             banner.classList.toggle('hidden', !isDefault);
         }
 
@@ -4155,18 +4265,56 @@
             try {
                 const found = users.find(u => (u.username.toLowerCase() === id || u.email.toLowerCase() === id));
                 let valid = false;
-                if (found) {
-                    if (looksHashed(found.password)) {
-                        valid = (await sha256Hex(pass)) === found.password;
-                    } else {
-                        // Legacy plain-text account (created before the security update) —
-                        // still honoured, then silently upgraded to a hash on success.
-                        valid = found.password === pass;
-                        if (valid) {
-                            found.password = await sha256Hex(pass);
-                            localStorage.setItem('moramaths_users', JSON.stringify(users));
-                            cloudPush();
+
+                if (found && found.password) {
+                    // Legacy account (created before the Firebase Authentication migration) —
+                    // verify against our own stored hash as before.
+                    const result = await verifyPassword(pass, found);
+                    valid = result.valid;
+                    if (valid) {
+                        // Right now we have their correct plaintext password in hand (they just
+                        // typed it) — this is the perfect, zero-friction moment to create their
+                        // real Firebase Authentication account with it, and retire our own
+                        // password/salt fields for good. If that can't happen right now (offline,
+                        // or another device just migrated this exact account a moment ago), we
+                        // keep them logged in via the old scheme this session and simply try
+                        // the migration again next time.
+                        if (firebaseReady && found.email) {
+                            try {
+                                await firebase.auth().createUserWithEmailAndPassword(found.email, pass);
+                                delete found.password;
+                                delete found.salt;
+                            } catch (migrateErr) {
+                                if (migrateErr && migrateErr.code === 'auth/email-already-in-use') {
+                                    try {
+                                        await firebase.auth().signInWithEmailAndPassword(found.email, pass);
+                                        delete found.password;
+                                        delete found.salt;
+                                    } catch (signInErr) { console.warn('Could not complete Firebase Auth migration:', signInErr); }
+                                } else {
+                                    console.warn('Could not migrate this account to Firebase Auth yet:', migrateErr);
+                                }
+                            }
                         }
+                        if (result.upgrade && found.password) {
+                            found.password = result.upgrade.password;
+                            found.salt = result.upgrade.salt;
+                        }
+                        localStorage.setItem('moramaths_users', JSON.stringify(users));
+                        cloudPush();
+                    }
+                } else if (found) {
+                    // Already-migrated account — the only credential check now is real
+                    // Firebase Authentication.
+                    if (!firebaseReady) {
+                        showToast(currentLang === 'si' ? "Login වෙන්න Internet සම්බන්ධතාවයක් අවශ්‍යයි." : "An internet connection is needed to log in.", 'error');
+                        return;
+                    }
+                    try {
+                        await firebase.auth().signInWithEmailAndPassword(found.email, pass);
+                        valid = true;
+                    } catch (authErr) {
+                        valid = false;
                     }
                 }
 
@@ -4268,9 +4416,24 @@
 
             if (!tempRegData) { closeOtpModal(); return; }
             if (enteredOtp === tempRegData.otp) {
-                const { otp, ...userRecord } = tempRegData;
-                userRecord.password = await sha256Hex(userRecord.password);
+                const { otp, password: rawPassword, ...userRecord } = tempRegData;
                 userRecord.studentId = generateStudentId();
+                if (firebaseReady) {
+                    try {
+                        await firebase.auth().createUserWithEmailAndPassword(userRecord.email, rawPassword);
+                    } catch (err) {
+                        console.warn('Firebase Auth account creation failed, falling back to local hash:', err);
+                        const { password, salt } = await hashNewPassword(rawPassword);
+                        userRecord.password = password;
+                        userRecord.salt = salt;
+                    }
+                } else {
+                    // Offline — fall back to our own hash so registration still works;
+                    // this account migrates to real Firebase Auth on its first online login.
+                    const { password, salt } = await hashNewPassword(rawPassword);
+                    userRecord.password = password;
+                    userRecord.salt = salt;
+                }
                 users.push(userRecord);
                 localStorage.setItem('moramaths_users', JSON.stringify(users));
                 cloudPush();
@@ -4301,6 +4464,13 @@
             document.getElementById('focus-mode-modal').classList.add('hidden');
             document.body.style.overflow = '';
             pauseFocusTimer();
+            // Drop back to an anonymous Firebase session so the app can keep reading/writing
+            // shared data (per Firestore rules) even while nobody's logged into the app itself.
+            if (firebaseReady) {
+                firebase.auth().signOut()
+                    .then(() => firebase.auth().signInAnonymously())
+                    .catch(err => console.warn('Sign-out / re-anonymize failed:', err));
+            }
             initApp();
         }
 
@@ -6595,8 +6765,29 @@
             if (password.length < 6) { showToast("Password must be at least 6 characters", 'error'); return; }
             if (users.some(u => u.username.toLowerCase() === username)) { showToast("Username already in use", 'error'); return; }
             if (users.some(u => u.email.toLowerCase() === emailInput)) { showToast("Email already in use", 'error'); return; }
-            const hashedPassword = await sha256Hex(password);
-            users.push({ fullname, email: emailInput, username, password: hashedPassword, role: 'admin', quizScores: {}, gameProgress: { unlocked: 1, scores: {} }, xp: 0, badges: [] });
+
+            const newUserRecord = { fullname, email: emailInput, username, role: 'admin', quizScores: {}, gameProgress: { unlocked: 1, scores: {} }, xp: 0, badges: [] };
+            let firebaseOk = false;
+            if (firebaseReady) {
+                try {
+                    // A second, separate Firebase App instance is the standard way to create
+                    // another user's account without hijacking the current (master admin's)
+                    // signed-in session — creating a user normally signs you in AS them.
+                    const secondaryApp = firebase.apps.find(a => a.name === 'Secondary') || firebase.initializeApp(firebaseConfig, 'Secondary');
+                    const secondaryAuth = secondaryApp.auth();
+                    await secondaryAuth.createUserWithEmailAndPassword(emailInput, password);
+                    await secondaryAuth.signOut();
+                    firebaseOk = true;
+                } catch (err) {
+                    console.warn('Firebase Auth account creation failed for new admin, falling back to local hash:', err);
+                }
+            }
+            if (!firebaseOk) {
+                const { password: hashedPassword, salt } = await hashNewPassword(password);
+                newUserRecord.password = hashedPassword;
+                newUserRecord.salt = salt;
+            }
+            users.push(newUserRecord);
             localStorage.setItem('moramaths_users', JSON.stringify(users));
             cloudPush();
             document.getElementById('new-admin-name').value = '';
